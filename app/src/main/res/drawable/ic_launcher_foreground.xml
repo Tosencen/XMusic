@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    自适应图标前景：2 条水平圆头波浪线，上下平行。
+    stroke + round cap/join 画曲线，strokeWidth 即线宽；
+    含线宽/圆帽在内的整体轮廓约 47.5x40，居中于 108 视口
+    （远小于 66dp 安全区），任何蒙版（圆/方圆）下都不会被裁切。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M34,43 C37,36 41,36 44,43 C47,50 51,50 54,43 C57,36 61,36 64,43 C67,50 71,50 74,43"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="7.5" />
+    <path
+        android:pathData="M34,65 C37,58 41,58 44,65 C47,72 51,72 54,65 C57,58 61,58 64,65 C67,72 71,72 74,65"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="7.5" />
+</vector>

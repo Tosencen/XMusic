@@ -1,0 +1,50 @@
+# Gradle
+.gradle/
+build/
+output.json
+
+# 本机配置（SDK 路径等）
+local.properties
+gradle.properties.local
+
+# 签名文件（永远不上传）
+*.jks
+*.keystore
+*.p12
+*.pem
+
+# 构建产物
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+misc.xml
+deploymentTargetDropDown.xml
+render.experimental.xml
+captures/
+.externalNativeBuild
+.cxx/
+
+# 工具与缓存（非工程内容）
+.kotlin/
+.workbuddy/
+.vscode/
+.vs/
+
+# 系统与临时文件
+.DS_Store
+Thumbs.db
+*.log
+*.hprof
+*.tmp
+*.temp
+*.swp
+*~
+
+# 本地服务配置（如有）
+google-services.json
+GoogleService-Info.plist

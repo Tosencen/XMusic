@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">XMusic</string>
+    <string name="app_tagline">本地音乐播放器</string>
+    <string name="navigate_up">返回</string>
+
+    <!-- 导航 -->
+    <string name="settings">设置</string>
+
+    <!-- 设置 -->
+    <string name="plugins">插件管理</string>
+    <string name="plugins_desc">安装与管理 .qplug 音源插件</string>
+    <string name="look_and_feel">外观</string>
+    <string name="look_and_feel_desc">主题、配色与字体</string>
+    <string name="overlay_lyric">悬浮歌词</string>
+    <string name="overlay_lyric_entry_desc">在其它应用上方悬浮显示歌词</string>
+    <string name="overlay_lyric_enabled">启用悬浮歌词</string>
+    <string name="overlay_lyric_enabled_desc">在其它应用上方显示歌词，需授予悬浮窗权限</string>
+    <string name="overlay_lyric_locked">锁定悬浮窗</string>
+    <string name="overlay_lyric_locked_desc">开启后触摸穿透，无法拖动</string>
+    <string name="overlay_lyric_font_size">字号</string>
+    <string name="overlay_lyric_width">窗口宽度</string>
+    <string name="overlay_lyric_bg_opacity">背景不透明度</string>
+    <string name="overlay_lyric_outline">文字描边</string>
+    <string name="overlay_lyric_outline_desc">提高在复杂背景上的可读性</string>
+    <string name="palette">配色</string>
+    <string name="theme">主题</string>
+    <string name="font">字体</string>
+    <string name="font_default">默认</string>
+    <string name="font_system">系统</string>
+    <string name="theme_system">跟随系统</string>
+    <string name="theme_dark">深色</string>
+    <string name="theme_light">浅色</string>
+    <string name="theme_amoled">纯黑</string>
+    <string name="about">关于</string>
+    <string name="about_desc">版本和信息</string>
+
+    <!-- 账号 / 音乐库 / 收藏 -->
+    <string name="account">账号</string>
+    <string name="account_login">登录音源账号</string>
+    <string name="account_not_logged_in">未登录</string>
+    <string name="account_no_plugin">没有支持登录的音源插件</string>
+    <string name="music_library">音乐库</string>
+    <string name="local_music">本地音乐</string>
+    <string name="recently_played">最近播放</string>
+    <string name="cached_music">缓存音乐</string>
+
+    <!-- 通用 -->
+    <string name="back">返回</string>
+</resources>
