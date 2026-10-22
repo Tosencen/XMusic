@@ -28,8 +28,8 @@ jobs:
           fail() { echo "::error::$1"; exit 1; }
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
           echo "::notice::SDK_ROOT=$SDK_ROOT"
-          if [ -d "$SDK_ROOT/platforms/android-37" ]; then
-            echo "::notice::android-37 已存在，跳过安装"
+          if [ -d "$SDK_ROOT/platforms/android-37.0" ]; then
+            echo "::notice::android-37.0 已存在，跳过安装"
             exit 0
           fi
           [ -d "$SDK_ROOT" ] || fail "SDK 目录不存在：$SDK_ROOT"
@@ -41,7 +41,7 @@ jobs:
           SDKMANAGER=$(find "$SDK_ROOT/cmdline-tools" -name sdkmanager -type f -print -quit 2>/dev/null || true)
           if [ -n "$SDKMANAGER" ]; then
             echo "::notice::尝试 sdkmanager=$SDKMANAGER"
-            if OUT=$("$SDKMANAGER" --sdk_root="$SDK_ROOT" "platforms;android-37" 2>&1); then
+            if OUT=$("$SDKMANAGER" --sdk_root="$SDK_ROOT" "platforms;android-37.0" 2>&1); then
               echo "::notice::sdkmanager 安装成功"
               exit 0
             fi
@@ -58,24 +58,24 @@ jobs:
             fi
           done
           [ "$REACH" = "1" ] || fail "dl.google.com 仓库 XML 不可达"
-          ZIP=$(grep -o 'platform-37_r[0-9]*\.zip' /tmp/repo.xml | head -1 || true)
-          [ -n "$ZIP" ] || fail "仓库 XML 中未找到 platform-37 zip（$(wc -c < /tmp/repo.xml) bytes）"
+          ZIP=$(grep -o 'platform-37\.0_r[0-9]*\.zip' /tmp/repo.xml | head -1 || true)
+          [ -n "$ZIP" ] || fail "仓库 XML 中未找到 platform-37.0 zip（$(wc -c < /tmp/repo.xml) bytes）"
           echo "::notice::下载 $ZIP"
           curl -fsSL --max-time 120 -o /tmp/p.zip "https://dl.google.com/android/repository/$ZIP" \
             || fail "下载 $ZIP 失败"
           rm -rf /tmp/pf && mkdir -p /tmp/pf
           unzip -q /tmp/p.zip -d /tmp/pf || fail "解压 $ZIP 失败"
-          mkdir -p "$SDK_ROOT/platforms/android-37"
+          mkdir -p "XX_PLACEHOLDER_XX
           if [ -f /tmp/pf/package.xml ]; then
-            cp -r /tmp/pf/. "$SDK_ROOT/platforms/android-37/"
+            cp -r /tmp/pf/. "$SDK_ROOT/platforms/android-37.0/"
           else
             INNER=$(ls -1 /tmp/pf 2>/dev/null | head -1 || true)
             [ -n "$INNER" ] || fail "zip 结构未知"
-            cp -r "/tmp/pf/$INNER/." "$SDK_ROOT/platforms/android-37/"
+            cp -r "/tmp/pf/$INNER/." "$SDK_ROOT/platforms/android-37.0/"
           fi
-          [ -f "$SDK_ROOT/platforms/android-37/package.xml" ] || fail "校验失败：缺 package.xml"
-          [ -f "$SDK_ROOT/platforms/android-37/android.jar" ] || fail "校验失败：缺 android.jar"
-          echo "::notice::android-37 手动安装成功"
+          [ -f "$SDK_ROOT/platforms/android-37.0/package.xml" ] || fail "校验失败：缺 package.xml"
+          [ -f "$SDK_ROOT/platforms/android-37.0/android.jar" ] || fail "校验失败：缺 android.jar"
+          echo "::notice::android-37.0 手动安装成功"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
