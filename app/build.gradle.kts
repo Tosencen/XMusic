@@ -1,3 +1,6 @@
+import java.io.File
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.compose.compiler)
@@ -17,11 +20,35 @@ android {
         versionName = "1.1.1"
     }
 
+    signingConfigs {
+        // 正式签名：环境变量（CI secrets）优先，其次本地 keystore.properties（gitignored）。
+        // 两者皆无时 storeFile 留空 → assembleRelease 失败（debug 构建不受影响），
+        // 杜绝此前「CI 每次随机 debug keystore、各版本签名互不一致」的问题。
+        create("release") {
+            val env = System.getenv()
+            val propsFile = rootProject.file("keystore.properties")
+            val props = Properties()
+            if (propsFile.exists()) propsFile.inputStream().use { props.load(it) }
+
+            fun pick(name: String): String? =
+                env[name]?.takeIf { it.isNotBlank() }
+                    ?: props.getProperty(name)?.takeIf { it.isNotBlank() }
+
+            pick("KEYSTORE_FILE")?.let { stored ->
+                val f = File(stored)
+                storeFile = if (f.isAbsolute) f else rootProject.file(stored)
+            }
+            storePassword = pick("KEYSTORE_PASSWORD")
+            keyAlias = pick("KEY_ALIAS")
+            keyPassword = pick("KEY_PASSWORD")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

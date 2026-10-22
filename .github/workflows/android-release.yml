@@ -65,7 +65,7 @@ jobs:
             || fail "下载 $ZIP 失败"
           rm -rf /tmp/pf && mkdir -p /tmp/pf
           unzip -q /tmp/p.zip -d /tmp/pf || fail "解压 $ZIP 失败"
-          mkdir -p "XX_PLACEHOLDER_XX
+          mkdir -p "$SDK_ROOT/platforms/android-37.0"
           if [ -f /tmp/pf/package.xml ]; then
             cp -r /tmp/pf/. "$SDK_ROOT/platforms/android-37.0/"
           else
@@ -92,7 +92,25 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Prepare signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::缺少 secret KEYSTORE_BASE64（仓库 Settings → Secrets and variables → Actions）。拒绝出包：否则 release 会退回随机 debug 签名，各版本签名互不一致、应用内更新装不上。"
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$GITHUB_WORKSPACE/xmusic-release.keystore"
+          [ -s "$GITHUB_WORKSPACE/xmusic-release.keystore" ] || { echo "::error::keystore base64 解码为空"; exit 1; }
+          echo "::notice::keystore 已就绪"
+
       - name: Build release APK
+        env:
+          KEYSTORE_FILE: xmusic-release.keystore
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          # PKCS12 不支持独立 key 口令（key 即以 store 口令保护），两者必须同值
+          KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
           if ! ./gradlew assembleRelease --stacktrace > build.log 2>&1; then
             BLOCK=$(awk '/What went wrong/,/Get more help/' build.log | head -80)
@@ -104,6 +122,15 @@ jobs:
             tail -n 60 build.log
             exit 1
           fi
+
+      - name: Verify APK signature
+        run: |
+          BT=$(ls -d "$ANDROID_HOME/build-tools/"*/ | sort -V | tail -1)
+          CERT=$("${BT}apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk 2>&1) \
+            || { echo "::error::apksigner 校验失败：$CERT"; exit 1; }
+          SHA=$(echo "$CERT" | grep -m1 'SHA-256 digest' | awk '{print $NF}')
+          echo "::notice::APK 签名 SHA-256=$SHA"
+          echo "$CERT" | grep 'Signer:' | head -4
 
       - name: Push failure log to ci-logs branch
         if: failure()

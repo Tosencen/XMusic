@@ -12,6 +12,7 @@ gradle.properties.local
 *.keystore
 *.p12
 *.pem
+keystore.properties
 
 # 构建产物
 *.apk
