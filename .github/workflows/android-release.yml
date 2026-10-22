@@ -83,11 +83,27 @@ jobs:
       - name: Build release APK
         run: |
           if ! ./gradlew assembleRelease --stacktrace > build.log 2>&1; then
-            grep -E "^e: |FAILURE:|error:|Execution failed|Caused by:|What went wrong" build.log | tail -20 | sed 's/^/::error::/' || true
+            awk '/What went wrong/,/^\* (Try|Get more help):/' build.log | head -50 | sed 's/^/::error::/' || true
+            grep -E "^e: |FAILURE:|error:|Execution failed|Caused by:|OutOfMemory" build.log | tail -15 | sed 's/^/::error::/' || true
             echo "=== build.log 尾部 ==="
             tail -n 60 build.log
             exit 1
           fi
+
+      - name: Push failure log to ci-logs branch
+        if: failure()
+        run: |
+          git config user.name "ci-logs"
+          git config user.email "ci-logs@users.noreply.github.com"
+          git checkout -B ci-logs
+          if [ -f build.log ]; then
+            tail -n 400 build.log > "failure-${GITHUB_SHA:0:7}.log"
+          else
+            echo "build.log 不存在（失败于更早步骤）" > "failure-${GITHUB_SHA:0:7}.log"
+          fi
+          git add -A
+          git commit -m "ci: failure log ${GITHUB_SHA:0:7}" || exit 0
+          git push -f origin ci-logs
 
       - name: Collect APK
         run: |
