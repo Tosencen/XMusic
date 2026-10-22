@@ -3,6 +3,7 @@ package com.xmgo.music.lyrics
 import android.content.Context
 import android.provider.MediaStore
 import android.util.LruCache
+import com.xmgo.music.data.cache.CachedMusicStore
 import com.xmgo.music.plugin.PluginManager
 import com.xmgo.music.plugin.model.Capabilities
 import com.xmgo.music.plugin.model.Lyrics
@@ -18,7 +19,8 @@ import java.io.File
 /**
  * 歌词解析入口。
  * 本地歌：查 MediaStore 文件路径 → 同名 .lrc；
- * 在线歌（mediaId = sourceId:rawId）：走插件 lyrics handler，翻译按时间戳合并。
+ * 在线歌（mediaId = sourceId:rawId）：优先读缓存 sidecar（离线可用），
+ * 未命中走插件 lyrics handler，翻译按时间戳合并；联网取到词且歌已缓存时写回 sidecar。
  *
  * 跨源兜底：本源无词时，用 [title]/[artist] 搜索其它具备 lyrics+searchSongs
  * 能力的插件，按歌名/歌手匹配后取词（结果仍按 mediaId 缓存）。
@@ -28,7 +30,8 @@ import java.io.File
  */
 class LyricsRepository(
     private val context: Context,
-    private val pluginManager: PluginManager
+    private val pluginManager: PluginManager,
+    private val cachedMusicStore: CachedMusicStore
 ) {
 
     /** 预取协程作用域（IO）。 */
@@ -47,7 +50,7 @@ class LyricsRepository(
             mediaId.startsWith(LOCAL_PREFIX) ->
                 loadLocal(mediaId.removePrefix(LOCAL_PREFIX).toLongOrNull())
             else ->
-                loadPlugin(mediaId, title, artist)
+                loadOnline(mediaId, title, artist)
         } ?: emptyList()
         cache.put(mediaId, lines)
         lines
@@ -92,13 +95,32 @@ class LyricsRepository(
         }
     }.getOrNull()
 
-    // ---------------------------------------------------------------- 插件
+    // ---------------------------------------------------------------- 在线
 
-    private suspend fun loadPlugin(
+    /**
+     * 在线歌取词：先读缓存 sidecar（缓存音乐时落盘，离线/免联网），未命中走插件；
+     * 联网取到词且该歌已缓存时写回 sidecar（老缓存首播在线自动补词）。
+     */
+    private suspend fun loadOnline(
         mediaId: String,
         title: String?,
         artist: String?
     ): List<LyricLine>? {
+        cachedMusicStore.readLyrics(mediaId)?.let { raw ->
+            parseLyrics(raw)?.let { return it }
+        }
+        val raw = fetchPluginLyrics(mediaId, title, artist) ?: return null
+        if (cachedMusicStore.isCached(mediaId)) {
+            runCatching { cachedMusicStore.saveLyrics(mediaId, raw) }
+        }
+        return parseLyrics(raw)
+    }
+
+    private suspend fun fetchPluginLyrics(
+        mediaId: String,
+        title: String?,
+        artist: String?
+    ): Lyrics? {
         if (':' !in mediaId) return null
         val sourceId = mediaId.substringBefore(':')
         val rawId = mediaId.substringAfter(':')
@@ -107,7 +129,7 @@ class LyricsRepository(
         // 1) 本源优先：rawId 直查，不联网搜索
         val own = runCatching {
             val provider = pluginManager.providerFor(sourceId)
-            val lyrics = provider.lyrics(
+            provider.lyrics(
                 Song(
                     id = mediaId,
                     name = "",
@@ -115,9 +137,8 @@ class LyricsRepository(
                     rawId = rawId
                 )
             )
-            parseLyrics(lyrics)
         }.getOrNull()
-        if (!own.isNullOrEmpty()) return own
+        if (own != null && parseLyrics(own) != null) return own
 
         // 2) 跨源兜底：本源无词（或插件无 lyrics 能力），搜其它插件取词
         if (title.isNullOrBlank()) return own
@@ -128,29 +149,30 @@ class LyricsRepository(
     /**
      * 跨插件取词：按安装顺序遍历其它同时具备 [Capabilities.LYRICS] +
      * [Capabilities.SEARCH_SONGS] 的插件，以「歌名 歌手」搜索，歌名/歌手
-     * 规范化匹配后取该插件自己的 rawId 查词，首个非空即返回。
+     * 规范化匹配后取该插件自己的 rawId 查词，首个可解析即返回（保留原始形态，
+     * 便于写回 sidecar 后离线重放逐字/翻译）。
      * 整段限时，超时放弃（本源已无词，宁缺毋滥）。
      */
     private suspend fun crossSourceLyrics(
         ownSourceId: String,
         title: String,
         artist: String?
-    ): List<LyricLine>? = withTimeoutOrNull(CROSS_SOURCE_TIMEOUT_MS) {
+    ): Lyrics? = withTimeoutOrNull(CROSS_SOURCE_TIMEOUT_MS) {
         val keyword = if (artist.isNullOrBlank()) title else "$title $artist"
         for (plugin in pluginManager.plugins) {
             if (plugin.id == ownSourceId) continue
             val caps = plugin.manifest.capabilities
             if (Capabilities.LYRICS !in caps || Capabilities.SEARCH_SONGS !in caps) continue
-            val lines = runCatching {
+            val lyrics = runCatching {
                 val provider = pluginManager.providerFor(plugin.id)
                 val match = provider.searchSongs(keyword).items
                     .firstOrNull { matchesTitleArtist(it, title, artist) }
                     ?: return@runCatching null
-                parseLyrics(provider.lyrics(match))
+                provider.lyrics(match)
             }.getOrNull()
-            if (!lines.isNullOrEmpty()) {
-                android.util.Log.d("LyricsRepository", "cross-source lyrics hit: plugin=${plugin.id} lines=${lines.size}")
-                return@withTimeoutOrNull lines
+            if (lyrics != null && parseLyrics(lyrics) != null) {
+                android.util.Log.d("LyricsRepository", "cross-source lyrics hit: plugin=${plugin.id}")
+                return@withTimeoutOrNull lyrics
             }
         }
         null

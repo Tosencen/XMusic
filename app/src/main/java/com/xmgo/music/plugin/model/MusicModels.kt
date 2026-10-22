@@ -32,7 +32,8 @@ data class StreamInfo(
     val headers: Map<String, String> = emptyMap()
 )
 
-/** 歌词（原文 + 可选翻译）。 */
+/** 歌词（原文 + 可选翻译）。可序列化：缓存时以原始形态落盘 sidecar，离线重放解析。 */
+@Serializable
 data class Lyrics(
     val original: String,
     val translation: String? = null,

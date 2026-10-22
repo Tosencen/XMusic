@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import com.xmgo.music.data.datastore.FavoritesStore
 import com.xmgo.music.plugin.PluginManager
+import com.xmgo.music.plugin.model.Lyrics
 import com.xmgo.music.plugin.model.Song
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -22,6 +23,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.serialization.Serializable
@@ -31,6 +33,9 @@ import okhttp3.Request
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
+
+/** 缓存时顺带拉取歌词的限时（超时则跳过，音频缓存照常成功）。 */
+private const val LYRICS_FETCH_TIMEOUT_MS = 15_000L
 
 /** 已缓存歌曲的索引条目（song 元数据 + 文件名 + 所属分组）。 */
 @Serializable
@@ -213,6 +218,25 @@ class CachedMusicStore(
     /** 命中缓存返回本地 file:// Uri，否则 null。 */
     fun localUriFor(mediaId: String): Uri? = fileFor(mediaId)?.let(Uri::fromFile)
 
+    /** 歌词 sidecar 文件（<sha1(mediaId)>.lyrics.json），与音频文件同名不同后缀。 */
+    private fun lyricsFileFor(mediaId: String): File = File(dir, sha1(mediaId) + ".lyrics.json")
+
+    /** 读取缓存的原始歌词（无文件/解析失败返回 null，调用方回退插件联网取词）。 */
+    fun readLyrics(mediaId: String): Lyrics? {
+        val file = lyricsFileFor(mediaId)
+        if (!file.isFile) return null
+        return runCatching {
+            json.decodeFromString<Lyrics>(file.readText(Charsets.UTF_8))
+        }.getOrNull()
+    }
+
+    /** 落盘原始歌词（存原始形态而非解析结果：yrc 逐字 / 翻译离线重放不丢）。 */
+    fun saveLyrics(mediaId: String, lyrics: Lyrics) {
+        runCatching {
+            lyricsFileFor(mediaId).writeText(json.encodeToString(lyrics), Charsets.UTF_8)
+        }
+    }
+
     /** 下载缓存（幂等：已缓存直接返回）。返回文件大小，失败抛异常。 */
     suspend fun cache(song: Song): Result<Long> = withContext(Dispatchers.IO) {
         val mediaId = mediaIdOf(song)
@@ -273,6 +297,13 @@ class CachedMusicStore(
                     )
                     val next = _cached.value.filterNot { mediaIdOf(it.song) == mediaId } + entry
                     persist(next)
+                    // 歌词一并缓存（best-effort：拉词失败不影响音频缓存结果）
+                    runCatching {
+                        withTimeoutOrNull(LYRICS_FETCH_TIMEOUT_MS) {
+                            val lyrics = pluginManager.providerFor(song.sourceId).lyrics(song)
+                            if (lyrics != null) saveLyrics(mediaId, lyrics)
+                        }
+                    }
                     target.length()
                 } catch (t: Throwable) {
                     tmp.delete()
@@ -291,6 +322,7 @@ class CachedMusicStore(
             val entry = _cached.value.firstOrNull { mediaIdOf(it.song) == mediaId }
                 ?: return@withLock
             File(dir, entry.fileName).delete()
+            lyricsFileFor(mediaId).delete()
             persist(_cached.value.filterNot { mediaIdOf(it.song) == mediaId })
         }
     }

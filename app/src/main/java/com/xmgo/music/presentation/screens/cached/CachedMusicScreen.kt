@@ -27,6 +27,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
@@ -159,6 +160,21 @@ fun CachedMusicScreen(onNavigateUp: () -> Unit) {
                     navigationIcon = {
                         IconButton(onClick = { selection = null }) {
                             Icon(Icons.Rounded.Close, contentDescription = "退出多选")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = {
+                            // 全选当前筛选后的可见条目；已全选则清空
+                            val visibleIds = displayEntries
+                                .map { cachedMusicStore.mediaIdOf(it.song) }
+                                .toSet()
+                            selection = if (visibleIds.isNotEmpty() && selected.containsAll(visibleIds)) {
+                                emptySet()
+                            } else {
+                                visibleIds
+                            }
+                        }) {
+                            Icon(Icons.Rounded.SelectAll, contentDescription = "全选")
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
