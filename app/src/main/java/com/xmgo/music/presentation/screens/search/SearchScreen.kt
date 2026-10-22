@@ -22,10 +22,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.MusicNote
-import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SearchOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -54,6 +56,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -460,28 +464,42 @@ fun SearchScreen(
                         .padding(start = 4.dp, end = 16.dp, top = 8.dp, bottom = 4.dp)
                 ) {
                     AnimatedBackIcon(visible = !inputFocused, onNavigateUp = onNavigateUp)
+                    // Material 3 搜索规范：清除 × 与加载态放框内 trailingIcon；
+                    // 提交走键盘「搜索」键，无框外按钮
                     OutlinedTextField(
                         value = query,
                         onValueChange = { query = it },
                         singleLine = true,
                         placeholder = { Text("搜索歌曲/歌手/专辑") },
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Text,
+                            imeAction = ImeAction.Search
+                        ),
+                        keyboardActions = KeyboardActions(onSearch = {
+                            if (query.isNotBlank()) {
+                                focusManager.clearFocus()
+                                searchAll()
+                            }
+                        }),
+                        trailingIcon = {
+                            when {
+                                loading -> CircularProgressIndicator(
+                                    modifier = Modifier.size(22.dp),
+                                    strokeWidth = 2.dp
+                                )
+                                // 点 × 清空并保持焦点，回到历史/热搜视图
+                                query.isNotEmpty() -> IconButton(onClick = { query = "" }) {
+                                    Icon(
+                                        Icons.Rounded.Close,
+                                        contentDescription = "清除"
+                                    )
+                                }
+                            }
+                        },
                         modifier = Modifier
                             .weight(1f)
                             .onFocusChanged { inputFocused = it.isFocused }
                     )
-                    IconButton(
-                        onClick = { searchAll() },
-                        enabled = !loading && query.isNotBlank()
-                    ) {
-                        if (loading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(22.dp),
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Icon(Icons.Rounded.Search, contentDescription = "搜索")
-                        }
-                    }
                 }
 
                 // 类目：按钮式切换（切换即重搜）
