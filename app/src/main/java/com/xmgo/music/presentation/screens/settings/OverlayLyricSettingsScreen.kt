@@ -125,7 +125,12 @@ private fun SettingsSwitchRow(
             .padding(horizontal = 20.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.weight(1f)) {
+        // 文字列右侧留白：避免说明文字贴上开关，并约束换行宽度
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 16.dp)
+        ) {
             Text(text = title, style = MaterialTheme.typography.bodyLarge)
             if (description != null) {
                 Text(
