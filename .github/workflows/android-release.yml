@@ -28,30 +28,54 @@ jobs:
           fail() { echo "::error::$1"; exit 1; }
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
           echo "::notice::SDK_ROOT=$SDK_ROOT"
-          if [ ! -d "$SDK_ROOT" ]; then
-            echo "::notice::SDK 目录不存在，交由 AGP 处理"
+          if [ -d "$SDK_ROOT/platforms/android-37" ]; then
+            echo "::notice::android-37 已存在，跳过安装"
             exit 0
           fi
+          [ -d "$SDK_ROOT" ] || fail "SDK 目录不存在：$SDK_ROOT"
+          # 预写 license（android-sdk-license 官方固定哈希），供 AGP 校验
+          mkdir -p "$SDK_ROOT/licenses"
+          printf '\n24333f8a63b6825ea9c5514f83c2829b004d1fee\nd56f5187479451eabf01fb78af6dfcb131a6481e' \
+            > "$SDK_ROOT/licenses/android-sdk-license"
+          # 1) 优先用镜像自带 sdkmanager（显式 --sdk_root）
           SDKMANAGER=$(find "$SDK_ROOT/cmdline-tools" -name sdkmanager -type f -print -quit 2>/dev/null || true)
-          if [ -z "$SDKMANAGER" ]; then
-            SDKMANAGER=$(find "$SDK_ROOT" -name sdkmanager -type f -print -quit 2>/dev/null || true)
-          fi
-          if [ -z "$SDKMANAGER" ]; then
-            echo "::notice::未找到 sdkmanager，下载 commandlinetools"
-            curl -fsSL -o /tmp/clt.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip \
-              || fail "下载 cmdline-tools 失败"
-            mkdir -p "$SDK_ROOT/cmdline-tools"
-            unzip -q /tmp/clt.zip -d "$SDK_ROOT/cmdline-tools" || fail "解压 cmdline-tools 失败"
-            if [ -d "$SDK_ROOT/cmdline-tools/cmdline-tools" ]; then
-              mv "$SDK_ROOT/cmdline-tools/cmdline-tools" "$SDK_ROOT/cmdline-tools/latest"
+          if [ -n "$SDKMANAGER" ]; then
+            echo "::notice::尝试 sdkmanager=$SDKMANAGER"
+            if OUT=$("$SDKMANAGER" --sdk_root="$SDK_ROOT" "platforms;android-37" 2>&1); then
+              echo "::notice::sdkmanager 安装成功"
+              exit 0
             fi
-            SDKMANAGER=$(find "$SDK_ROOT/cmdline-tools" -name sdkmanager -type f -print -quit 2>/dev/null || true)
-            [ -n "$SDKMANAGER" ] || fail "cmdline-tools 安装后仍未找到 sdkmanager"
+            echo "::notice::sdkmanager 失败，转 curl 手动安装：$(echo "$OUT" | tail -5 | tr '\n' ' ' | cut -c1-300)"
+          else
+            echo "::notice::未找到 sdkmanager，转 curl 手动安装"
           fi
-          echo "::notice::sdkmanager=$SDKMANAGER"
-          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
-          OUT=$("$SDKMANAGER" "platforms;android-37" 2>&1) || fail "sdkmanager 安装 android-37 失败：$(echo "$OUT" | tail -3 | tr '\n' ' ')"
-          echo "::notice::android-37 安装成功"
+          # 2) curl 直取仓库 XML → 下载 platform zip → 手动放置
+          REACH=0
+          for f in repository2-3.xml repository2-1.xml; do
+            if curl -fsSL --max-time 20 -o /tmp/repo.xml "https://dl.google.com/android/repository/$f"; then
+              REACH=1
+              grep -q "platform-37" /tmp/repo.xml && break
+            fi
+          done
+          [ "$REACH" = "1" ] || fail "dl.google.com 仓库 XML 不可达"
+          ZIP=$(grep -o 'platform-37_r[0-9]*\.zip' /tmp/repo.xml | head -1 || true)
+          [ -n "$ZIP" ] || fail "仓库 XML 中未找到 platform-37 zip（$(wc -c < /tmp/repo.xml) bytes）"
+          echo "::notice::下载 $ZIP"
+          curl -fsSL --max-time 120 -o /tmp/p.zip "https://dl.google.com/android/repository/$ZIP" \
+            || fail "下载 $ZIP 失败"
+          rm -rf /tmp/pf && mkdir -p /tmp/pf
+          unzip -q /tmp/p.zip -d /tmp/pf || fail "解压 $ZIP 失败"
+          mkdir -p "$SDK_ROOT/platforms/android-37"
+          if [ -f /tmp/pf/package.xml ]; then
+            cp -r /tmp/pf/. "$SDK_ROOT/platforms/android-37/"
+          else
+            INNER=$(ls -1 /tmp/pf 2>/dev/null | head -1 || true)
+            [ -n "$INNER" ] || fail "zip 结构未知"
+            cp -r "/tmp/pf/$INNER/." "$SDK_ROOT/platforms/android-37/"
+          fi
+          [ -f "$SDK_ROOT/platforms/android-37/package.xml" ] || fail "校验失败：缺 package.xml"
+          [ -f "$SDK_ROOT/platforms/android-37/android.jar" ] || fail "校验失败：缺 android.jar"
+          echo "::notice::android-37 手动安装成功"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
