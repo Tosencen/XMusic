@@ -14,6 +14,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             XmgoTheme {
                 Nav()
+                // 应用自更新对话框（观察 AppUpdater.pendingUpdate，无新版时零开销）
+                com.xmgo.music.update.AppUpdateDialogHost()
             }
         }
     }

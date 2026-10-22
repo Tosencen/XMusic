@@ -3,6 +3,11 @@ package com.xmgo.music
 import android.app.Application
 import com.xmgo.music.di.appModule
 import com.xmgo.music.plugin.PluginManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.koin.android.ext.koin.androidContext
 import org.koin.android.ext.koin.androidLogger
 import org.koin.core.context.startKoin
@@ -20,5 +25,11 @@ class MusicApp : Application() {
         KoinPlatform.getKoin().get<PluginManager>().init()
         // 悬浮歌词：注册设置监听 + 切歌歌词预载（未开启时仅 collect 设置，无窗口）
         KoinPlatform.getKoin().get<com.xmgo.music.overlay.OverlayLyricManager>()
+        // 应用自更新：启动 5s 后静默查一次（每进程一次；断网/失败静默，有新版经全局弹窗提示）
+        CoroutineScope(SupervisorJob() + Dispatchers.Main).launch {
+            delay(5_000)
+            val updater = KoinPlatform.getKoin().get<com.xmgo.music.update.AppUpdater>()
+            runCatching { updater.check() }.getOrNull()?.let(updater::offer)
+        }
     }
 }

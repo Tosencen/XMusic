@@ -31,6 +31,7 @@ val appModule = module {
     single { com.xmgo.music.presentation.screens.search.SearchPageCache() }
     single { com.xmgo.music.playback.PlaybackStateStore(androidContext()) }
     single { LyricsRepository(androidContext(), get(), get()) }
+    single { com.xmgo.music.update.AppUpdater(androidContext()) }
     single { PlayerController(androidContext(), get(), get(), get(), get(), get(), get()) }
     single {
         com.xmgo.music.overlay.OverlayLyricManager(

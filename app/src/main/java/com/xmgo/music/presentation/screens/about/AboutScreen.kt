@@ -1,5 +1,6 @@
 package com.xmgo.music.presentation.screens.about
 
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,9 +18,15 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
@@ -28,7 +35,10 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.xmgo.music.R
+import com.xmgo.music.update.AppUpdater
 import com.xmgo.music.utils.appVersion
+import kotlinx.coroutines.launch
+import org.koin.mp.KoinPlatform
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -101,6 +111,36 @@ fun AboutScreen(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            // 手动检查更新：有新版走全局弹窗（AppUpdateDialogHost），与启动静默检查同一条路径
+            val updater: AppUpdater = remember { KoinPlatform.getKoin().get() }
+            var checking by remember { mutableStateOf(false) }
+            val scope = rememberCoroutineScope()
+            TextButton(
+                enabled = !checking,
+                onClick = {
+                    checking = true
+                    scope.launch {
+                        val result = runCatching { updater.check() }
+                        checking = false
+                        result.onSuccess { info ->
+                            if (info == null) {
+                                Toast.makeText(
+                                    context, "已是最新版本", Toast.LENGTH_SHORT
+                                ).show()
+                            } else {
+                                updater.consume()
+                                updater.offer(info)
+                            }
+                        }.onFailure {
+                            Toast.makeText(
+                                context, "检查更新失败", Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                }
+            ) {
+                Text(if (checking) "检查中…" else "检查更新")
+            }
             Spacer(modifier = Modifier.height(16.dp))
             Text(
                 text = stringResource(R.string.about_desc),
