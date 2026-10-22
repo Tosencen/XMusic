@@ -25,37 +25,33 @@ jobs:
 
       - name: Install Android platform
         run: |
+          fail() { echo "::error::$1"; exit 1; }
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          {
-            echo "### SDK 环境"
-            echo "- ANDROID_HOME=${ANDROID_HOME:-<unset>}"
-            echo "- ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-<unset>}"
-            echo "- 解析 SDK_ROOT=$SDK_ROOT"
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::SDK_ROOT=$SDK_ROOT"
           if [ ! -d "$SDK_ROOT" ]; then
-            echo "SDK 目录不存在，交由 AGP 处理" >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::SDK 目录不存在，交由 AGP 处理"
             exit 0
           fi
-          SDKMANAGER=$(find "$SDK_ROOT/cmdline-tools" -name sdkmanager -type f -print -quit 2>/dev/null)
+          SDKMANAGER=$(find "$SDK_ROOT/cmdline-tools" -name sdkmanager -type f -print -quit 2>/dev/null || true)
           if [ -z "$SDKMANAGER" ]; then
-            SDKMANAGER=$(find "$SDK_ROOT" -name sdkmanager -type f -print -quit 2>/dev/null)
+            SDKMANAGER=$(find "$SDK_ROOT" -name sdkmanager -type f -print -quit 2>/dev/null || true)
           fi
-          echo "sdkmanager=$SDKMANAGER"
           if [ -z "$SDKMANAGER" ]; then
-            echo "未找到 sdkmanager，交由 AGP 自动下载" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+            echo "::notice::未找到 sdkmanager，下载 commandlinetools"
+            curl -fsSL -o /tmp/clt.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip \
+              || fail "下载 cmdline-tools 失败"
+            mkdir -p "$SDK_ROOT/cmdline-tools"
+            unzip -q /tmp/clt.zip -d "$SDK_ROOT/cmdline-tools" || fail "解压 cmdline-tools 失败"
+            if [ -d "$SDK_ROOT/cmdline-tools/cmdline-tools" ]; then
+              mv "$SDK_ROOT/cmdline-tools/cmdline-tools" "$SDK_ROOT/cmdline-tools/latest"
+            fi
+            SDKMANAGER=$(find "$SDK_ROOT/cmdline-tools" -name sdkmanager -type f -print -quit 2>/dev/null || true)
+            [ -n "$SDKMANAGER" ] || fail "cmdline-tools 安装后仍未找到 sdkmanager"
           fi
+          echo "::notice::sdkmanager=$SDKMANAGER"
           yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
-          if ! OUT=$("$SDKMANAGER" "platforms;android-37" 2>&1); then
-            {
-              echo "### sdkmanager 安装 android-37 失败"
-              echo '```'
-              echo "$OUT"
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          echo "android-37 安装成功" >> "$GITHUB_STEP_SUMMARY"
+          OUT=$("$SDKMANAGER" "platforms;android-37" 2>&1) || fail "sdkmanager 安装 android-37 失败：$(echo "$OUT" | tail -3 | tr '\n' ' ')"
+          echo "::notice::android-37 安装成功"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -63,13 +59,9 @@ jobs:
       - name: Build release APK
         run: |
           if ! ./gradlew assembleRelease --stacktrace > build.log 2>&1; then
-            {
-              echo "### Release 构建失败日志尾部"
-              echo '```'
-              tail -n 120 build.log
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            tail -n 40 build.log
+            grep -E "^e: |FAILURE:|error:|Execution failed|Caused by:|What went wrong" build.log | tail -20 | sed 's/^/::error::/' || true
+            echo "=== build.log 尾部 ==="
+            tail -n 60 build.log
             exit 1
           fi
 
