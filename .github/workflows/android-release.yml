@@ -25,14 +25,37 @@ jobs:
 
       - name: Install Android platform
         run: |
-          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f 2>/dev/null | head -1)
-          echo "sdkmanager=$SDKMANAGER ANDROID_HOME=$ANDROID_HOME"
-          if [ -n "$SDKMANAGER" ]; then
-            yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
-            "$SDKMANAGER" "platforms;android-37"
-          else
-            echo "未找到 sdkmanager，交由 AGP 自动下载"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          {
+            echo "### SDK 环境"
+            echo "- ANDROID_HOME=${ANDROID_HOME:-<unset>}"
+            echo "- ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-<unset>}"
+            echo "- 解析 SDK_ROOT=$SDK_ROOT"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ ! -d "$SDK_ROOT" ]; then
+            echo "SDK 目录不存在，交由 AGP 处理" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
+          SDKMANAGER=$(find "$SDK_ROOT/cmdline-tools" -name sdkmanager -type f -print -quit 2>/dev/null)
+          if [ -z "$SDKMANAGER" ]; then
+            SDKMANAGER=$(find "$SDK_ROOT" -name sdkmanager -type f -print -quit 2>/dev/null)
+          fi
+          echo "sdkmanager=$SDKMANAGER"
+          if [ -z "$SDKMANAGER" ]; then
+            echo "未找到 sdkmanager，交由 AGP 自动下载" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          if ! OUT=$("$SDKMANAGER" "platforms;android-37" 2>&1); then
+            {
+              echo "### sdkmanager 安装 android-37 失败"
+              echo '```'
+              echo "$OUT"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "android-37 安装成功" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
