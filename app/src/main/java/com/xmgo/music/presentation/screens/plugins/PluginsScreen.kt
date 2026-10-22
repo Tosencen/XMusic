@@ -89,6 +89,7 @@ fun PluginsScreen(onNavigateUp: () -> Unit) {
     var catalog by remember { mutableStateOf<List<CatalogRelease>?>(null) }
     var catalogLoading by remember { mutableStateOf(false) }
     var installingId by remember { mutableStateOf<String?>(null) }
+    var showDisclaimer by remember { mutableStateOf(false) }
 
     var primarySource by rememberPrimarySource()
 
@@ -362,7 +363,25 @@ fun PluginsScreen(onNavigateUp: () -> Unit) {
                     )
                 }
             }
+
+            // 底部：免责声明入口（与关于页同一弹窗组件）
+            item {
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    FilledTonalButton(onClick = { showDisclaimer = true }) {
+                        Text("免责声明")
+                    }
+                }
+            }
         }
+    }
+
+    if (showDisclaimer) {
+        com.xmgo.music.presentation.components.DisclaimerDialog(
+            onDismiss = { showDisclaimer = false }
+        )
     }
 
     // ---------- 插件详情（更新 / 主音源 / 登录 / 移除） ----------
