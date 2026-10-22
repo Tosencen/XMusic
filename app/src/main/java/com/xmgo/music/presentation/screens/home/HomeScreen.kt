@@ -1,10 +1,5 @@
 package com.xmgo.music.presentation.screens.home
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -58,7 +53,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import coil3.compose.AsyncImage
 import com.xmgo.music.data.datastore.rememberPrimarySource
 import com.xmgo.music.data.cache.CachedMusicStore
@@ -160,20 +154,6 @@ fun HomeScreen(
             account = account,
             tick = refreshTick
         )
-    }
-
-    // 媒体通知权限（播放服务的通知栏控制）
-    val notifLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { }
-    LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            ContextCompat.checkSelfPermission(
-                context, Manifest.permission.POST_NOTIFICATIONS
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
     }
 
     fun playSongs(songs: List<com.xmgo.music.plugin.model.Song>, index: Int) {

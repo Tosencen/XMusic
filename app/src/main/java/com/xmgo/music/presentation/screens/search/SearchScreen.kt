@@ -32,7 +32,6 @@ import androidx.compose.material.icons.rounded.SearchOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -502,10 +501,12 @@ fun SearchScreen(
                     )
                 }
 
-                // 类目：按钮式切换（切换即重搜）
+                // 类目：按钮式切换（切换即重搜），居中展示
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
                 ) {
                     CategoryChip("歌曲", selected = tab == 0) { tab = 0 }
                     CategoryChip("歌手", selected = tab == 1) { tab = 1 }
@@ -520,8 +521,6 @@ fun SearchScreen(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                     )
                 }
-
-                HorizontalDivider()
 
                 when {
                     query.isBlank() -> HistoryAndHotSearch(

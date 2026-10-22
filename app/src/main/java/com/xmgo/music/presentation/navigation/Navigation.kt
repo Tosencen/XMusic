@@ -71,6 +71,21 @@ fun Nav() {
             }
         )
     }
+    // 媒体通知权限（播放服务通知栏控制）：等首启音源配置处理完再请求，
+    // 避免与配置弹窗同屏叠加（错峰，一次只打扰一件事）
+    val notifLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { }
+    androidx.compose.runtime.LaunchedEffect(setupAck) {
+        if (setupAck &&
+            android.os.Build.VERSION.SDK_INT >= 33 &&
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.POST_NOTIFICATIONS
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     Box(modifier = Modifier.fillMaxSize()) {
         NavDisplay(
             backStack = backStack,
