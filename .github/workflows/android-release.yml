@@ -77,14 +77,29 @@ jobs:
           [ -f "$SDK_ROOT/platforms/android-37.0/android.jar" ] || fail "校验失败：缺 android.jar"
           echo "::notice::android-37.0 手动安装成功"
 
+      - name: Probe repository reachability
+        run: |
+          for u in \
+            "https://repo.maven.apache.org/maven2/" \
+            "https://plugins.gradle.org/m2/" \
+            "https://maven.aliyun.com/repository/public/" \
+            "https://maven.aliyun.com/repository/google/" \
+            "https://dl.google.com/dl/android/maven2/"; do
+            code=$(curl -s -m 12 -o /dev/null -w "%{http_code}" "$u" || echo "000")
+            echo "::notice::probe $u -> $code"
+          done
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build release APK
         run: |
           if ! ./gradlew assembleRelease --stacktrace > build.log 2>&1; then
-            awk '/What went wrong/,/^\* (Try|Get more help):/' build.log | head -50 | sed 's/^/::error::/' || true
-            grep -E "^e: |FAILURE:|error:|Execution failed|Caused by:|OutOfMemory" build.log | tail -15 | sed 's/^/::error::/' || true
+            BLOCK=$(awk '/What went wrong/,/Get more help/' build.log | head -80)
+            ENC=$(printf '%s' "$BLOCK" | sed -e 's/$/%0A/' | tr -d '\n')
+            echo "::error::$ENC"
+            grep -E "Could not GET|Could not HEAD|Could not resolve|status code|timed out|Connection|OutOfMemory|^e: " build.log \
+              | tail -25 | sed 's/^/::error::/' || true
             echo "=== build.log 尾部 ==="
             tail -n 60 build.log
             exit 1
@@ -97,11 +112,12 @@ jobs:
           git config user.email "ci-logs@users.noreply.github.com"
           git checkout -B ci-logs
           if [ -f build.log ]; then
-            tail -n 400 build.log > "failure-${GITHUB_SHA:0:7}.log"
+            tail -n 500 build.log > "failure-${GITHUB_SHA:0:7}.log"
           else
             echo "build.log 不存在（失败于更早步骤）" > "failure-${GITHUB_SHA:0:7}.log"
           fi
-          git add -A
+          git add -f "failure-${GITHUB_SHA:0:7}.log"
+          git add -f build.log 2>/dev/null || true
           git commit -m "ci: failure log ${GITHUB_SHA:0:7}" || exit 0
           git push -f origin ci-logs
 
