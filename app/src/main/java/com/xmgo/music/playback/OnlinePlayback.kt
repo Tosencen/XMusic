@@ -80,6 +80,9 @@ suspend fun resolveQueue(
 /** 起播后先补的「下一首窗口」曲数（保证马上按下一曲有歌）。 */
 private const val NEXT_WINDOW = 5
 
+/** 后续曲目每批解析追加的曲数：分批让队尾持续长出新曲，避免“下一首”点到队尾。 */
+private const val REST_CHUNK = 8
+
 /**
  * 后台补队列用的独立作用域：UI 协程取消（用户离开页面）也不能中断
  * 前置/后续曲目的解析插入，否则队列永远残缺。
@@ -102,6 +105,12 @@ private fun cancelStagedFill() {
         stagedQuietToken = null
     }
 }
+
+/**
+ * 补队列是否仍在途（后续曲目还可能随时追加进 media3 队列）。
+ * 队尾“下一首”补切用：点到队尾时若仍在补，则等待队列长出后自动完成切歌。
+ */
+fun isStaging(): Boolean = stagedJob?.isActive == true
 
 /**
  * 秒开起播（对齐 qplayer "只解析当前曲" 思路）：
@@ -142,7 +151,6 @@ suspend fun playSongsStaged(
                     resolveQueue(songs.subList(from, to), pluginManager, cache)
                 },
                 index = index,
-                targetId = target.mediaId,
                 playerController = playerController
             )
         } finally {
@@ -154,33 +162,41 @@ suspend fun playSongsStaged(
 }
 
 /**
- * 起播后补全队列：先「下一首」窗口（用户马上按下一曲的需求）、再前置、再剩余。
- * 每一步都经 [PlayerController] 的 mediaId 校验，期间换歌则静默放弃。
+ * 起播后补全队列，顺序：「下一首」窗口（马上按下一曲的刚需）→ 后续剩余（分批）→ 前置。
+ * 守卫用整份歌单 mediaId 集合（当前曲仍在本歌单即允许继续补）：
+ * 用户在补队列期间连按「下一首」在窗口内换曲属正常操作，不能作废剩余补队列
+ *（历史 bug：只认起播目标那一首 → 切过一次后剩余全部被拒 → 队列停在 5 首窗口、
+ * 连点几下后「下一首」永久点不动）；用户真播了别的歌单则当前曲不在集合中、拒绝防串台。
  */
 private suspend fun fillQueueAround(
     mediaIds: List<String>,
     resolve: suspend (from: Int, to: Int) -> List<MediaItem>,
     index: Int,
-    targetId: String,
     playerController: PlayerController
 ) {
     val size = mediaIds.size
+    val validIds = mediaIds.toSet()
     // 1) 下一首窗口：index+1 .. min(index+NEXT_WINDOW, size)
     val nearFrom = index + 1
     val nearTo = minOf(nearFrom + NEXT_WINDOW, size)
     if (nearFrom < nearTo) {
         val near = resolve(nearFrom, nearTo)
-        if (near.isNotEmpty()) playerController.appendQueue(near, targetId)
+        if (near.isNotEmpty()) playerController.appendQueue(near, validIds)
     }
-    // 2) 前置：0 .. index（倒序解析保持相对顺序成本高，直接整段一次解析）
+    // 2) 后续剩余：分批解析分批追加（原先整批解析完再一次 append，大歌单要
+    //    数分钟，期间连按下一首很快把 5 首窗口耗尽点不动）。
+    //    放在前置之前：大歌单 [0, index) 前缀解析不能阻塞向前补队列。
+    var restFrom = nearTo
+    while (restFrom < size) {
+        val to = minOf(restFrom + REST_CHUNK, size)
+        val chunk = resolve(restFrom, to)
+        if (chunk.isNotEmpty()) playerController.appendQueue(chunk, validIds)
+        restFrom = to
+    }
+    // 3) 前置 0..index：整批插队首（向后补不构成前方死区，放最后）
     if (index > 0) {
         val prefix = resolve(0, index)
-        if (prefix.isNotEmpty()) playerController.prependQueue(prefix, targetId)
-    }
-    // 3) 剩余：nearTo .. size
-    if (nearTo < size) {
-        val rest = resolve(nearTo, size)
-        if (rest.isNotEmpty()) playerController.appendQueue(rest, targetId)
+        if (prefix.isNotEmpty()) playerController.prependQueue(prefix, validIds)
     }
 }
 
@@ -258,7 +274,6 @@ suspend fun playEntriesStaged(
                     resolveEntries(entries.subList(from, to), pluginManager, cache)
                 },
                 index = index,
-                targetId = target.mediaId,
                 playerController = playerController
             )
         } finally {

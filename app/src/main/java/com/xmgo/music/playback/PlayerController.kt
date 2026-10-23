@@ -81,6 +81,10 @@ class PlayerController(
     /** 歌词预取防抖：连按下一首时取消未触发的预取，避免挤占插件单线程 actor。 */
     private var lyricsPrefetchJob: Job? = null
     private var restored = false
+    /** 断连窗口期排队的播控命令，连接成功后补执行（否则 controller 为空时点按静默失效）。 */
+    private var pendingControl: ((MediaController) -> Unit)? = null
+    /** 队尾“下一首”补切轮询任务（见 [armQueueTailRetry]）。 */
+    private var queueTailRetryJob: Job? = null
 
     /** 流地址失效自动重解析的防死循环标记（同一曲目 30 秒内只重试一次）。 */
     @Volatile private var lastRetryMediaId: String? = null
@@ -187,6 +191,16 @@ class PlayerController(
                         connect()
                     }
                 }
+                // 连接成功后补执行断连窗口期排队的播控（如迷你播放条“下一首”）。
+                // 放在 runCatching 外：命令自身异常不应被误判为连接失败。
+                // 连接失败时 controller 仍为 null，保留排队等下次重连成功再执行。
+                val connected = controller
+                if (connected != null) {
+                    pendingControl?.let { act ->
+                        pendingControl = null
+                        act(connected)
+                    }
+                }
             },
             mainExecutor
         )
@@ -220,14 +234,17 @@ class PlayerController(
     }
 
     /**
-     * 秒开起播的第二阶段：把后台解析完的曲目追加到队尾。
-     * 仅当当前播放曲仍是起播目标（mediaId 匹配）才追加，防止期间
-     * 用户点了别的歌单导致错队列污染。
+     * 把后台解析完的曲目追加到队尾。
+     * [validMediaIds] = 目标歌单全部 mediaId：当前曲只要还在本歌单内就允许追加——
+     * 补队列在途时用户连按「下一首」切到窗口内其他曲是正常操作，不能作废剩余补队列。
+     * 历史 bug：这里只认起播目标那一首，切过一次后 rest/prefix 全被静默拒绝，
+     * 队列停在 5 首窗口，连点几下后「下一首」永久点不动。
+     * 播放了别的歌单时当前曲不在集合中 → 拒绝，防串台。
      */
-    fun appendQueue(items: List<MediaItem>, expectedCurrentMediaId: String): Boolean {
+    fun appendQueue(items: List<MediaItem>, validMediaIds: Set<String>): Boolean {
         val c = controller ?: return false
         if (items.isEmpty()) return false
-        if (c.currentMediaItem?.mediaId != expectedCurrentMediaId) return false
+        if (c.currentMediaItem?.mediaId !in validMediaIds) return false
         Log.d("PlayerController", "appendQueue +${items.size} (now ${c.mediaItemCount + items.size})")
         c.addMediaItems(items)
         syncFromPlayer()
@@ -237,12 +254,12 @@ class PlayerController(
 
     /**
      * 把解析好的前置曲目插到队首（点播列表中间时补 [0, index)）。
-     * Media3 插入后当前曲下标自动后移，播放不中断。
+     * Media3 插入后当前曲下标自动后移，播放不中断。守卫同 [appendQueue]。
      */
-    fun prependQueue(items: List<MediaItem>, expectedCurrentMediaId: String): Boolean {
+    fun prependQueue(items: List<MediaItem>, validMediaIds: Set<String>): Boolean {
         val c = controller ?: return false
         if (items.isEmpty()) return false
-        if (c.currentMediaItem?.mediaId != expectedCurrentMediaId) return false
+        if (c.currentMediaItem?.mediaId !in validMediaIds) return false
         Log.d("PlayerController", "prependQueue +${items.size} (now ${c.mediaItemCount + items.size})")
         c.addMediaItems(0, items)
         syncFromPlayer()
@@ -309,17 +326,75 @@ class PlayerController(
         }
     }
 
+    /**
+     * 播控统一入口：退后台服务被回收后 controller 断连，重连窗口期内点按若直接
+     * `controller?.xxx` 会静默失效（迷你播放条“下一首”点了没反应的历史 bug）。
+     * 这里先排队，连接成功后补执行。
+     */
+    private fun controlOrQueue(action: (MediaController) -> Unit) {
+        val c = controller
+        if (c != null) {
+            action(c)
+        } else {
+            pendingControl = action
+            connect()
+        }
+    }
+
     fun next() {
-        controller?.seekToNextMediaItem()
+        controlOrQueue { c ->
+            if (c.mediaItemCount == 0) return@controlOrQueue
+            if (c.hasNextMediaItem()) {
+                c.seekToNextMediaItem()
+                // 立即刷 UI/持久化，不等 media3 事件回调或 500ms 轮询
+                syncFromPlayer()
+                persist()
+            } else {
+                // 队尾见底：在线歌补队列是分批追加的，短窗口内点到队尾时
+                // 挂起意图，队列长出新曲后自动补切；补队列已结束仍无下一首
+                // = 真到列表尾（REPEAT_MODE_OFF），静默不动作
+                armQueueTailRetry()
+            }
+        }
+    }
+
+    /**
+     * 队尾“下一首”补切：轮询等待补队列把后续曲目追加进来，落地后替用户完成这次切歌。
+     * 用户手动换了歌（当前 mediaId 变化）立即作废；最多等 [QUEUE_TAIL_RETRY_MAX] 次。
+     */
+    private fun armQueueTailRetry() {
+        if (queueTailRetryJob?.isActive == true) return
+        queueTailRetryJob = scope.launch {
+            val c0 = controller ?: return@launch
+            val armedId = c0.currentMediaItem?.mediaId ?: return@launch
+            repeat(QUEUE_TAIL_RETRY_MAX) {
+                delay(QUEUE_TAIL_RETRY_DELAY_MS)
+                val c = controller ?: return@launch
+                // 用户已手动换曲 → 本次挂起作废
+                if (c.currentMediaItem?.mediaId != armedId) return@launch
+                if (c.hasNextMediaItem()) {
+                    c.seekToNextMediaItem()
+                    syncFromPlayer()
+                    persist()
+                    return@launch
+                }
+                // 补队列已收尾仍无下一首 = 真到列表尾，停止等待
+                if (!isStaging()) return@launch
+            }
+        }
     }
 
     fun previous() {
-        val c = controller ?: return
-        // 超过 3 秒先回开头，否则跳上一首（标准播放器交互）
-        if (c.currentPosition > 3000 || !c.hasPreviousMediaItem()) {
-            c.seekTo(0)
-        } else {
-            c.seekToPreviousMediaItem()
+        controlOrQueue { c ->
+            if (c.mediaItemCount == 0) return@controlOrQueue
+            // 超过 3 秒先回开头，否则跳上一首（标准播放器交互）
+            if (c.currentPosition > 3000 || !c.hasPreviousMediaItem()) {
+                c.seekTo(0)
+            } else {
+                c.seekToPreviousMediaItem()
+            }
+            syncFromPlayer()
+            persist()
         }
     }
 
@@ -573,6 +648,10 @@ class PlayerController(
 
         /** 切歌稳定后才预取歌词的防抖时长（连按下一首时不入队 lyrics 调用）。 */
         private const val LYRICS_PREFETCH_DEBOUNCE_MS = 500L
+
+        /** 队尾“下一首”补切：轮询间隔与上限（800ms × 12 ≈ 9.6s，覆盖一个分批解析周期）。 */
+        private const val QUEUE_TAIL_RETRY_DELAY_MS = 800L
+        private const val QUEUE_TAIL_RETRY_MAX = 12
     }
 }
 
