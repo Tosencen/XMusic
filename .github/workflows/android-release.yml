@@ -100,9 +100,13 @@ jobs:
             echo "::error::缺少 secret KEYSTORE_BASE64（仓库 Settings → Secrets and variables → Actions）。拒绝出包：否则 release 会退回随机 debug 签名，各版本签名互不一致、应用内更新装不上。"
             exit 1
           fi
-          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$GITHUB_WORKSPACE/xmusic-release.keystore"
-          [ -s "$GITHUB_WORKSPACE/xmusic-release.keystore" ] || { echo "::error::keystore base64 解码为空"; exit 1; }
-          echo "::notice::keystore 已就绪"
+          # 容错：去掉换行/回车/空格后再解码（macOS base64 输出带折行）
+          CLEAN=$(printf '%s' "$KEYSTORE_BASE64" | tr -d '\r\n\t ')
+          printf '%s' "$CLEAN" | base64 -d > "$GITHUB_WORKSPACE/xmusic-release.keystore" \
+            || { echo "::error::KEYSTORE_BASE64 解码失败：总长 ${#KEYSTORE_BASE64}，去空白后 ${#CLEAN}，前缀 ${CLEAN:0:16}…"; exit 1; }
+          [ -s "$GITHUB_WORKSPACE/xmusic-release.keystore" ] \
+            || { echo "::error::keystore 解码后为空文件"; exit 1; }
+          echo "::notice::keystore 已就绪（$(wc -c < "$GITHUB_WORKSPACE/xmusic-release.keystore") bytes）"
 
       - name: Build release APK
         env:
