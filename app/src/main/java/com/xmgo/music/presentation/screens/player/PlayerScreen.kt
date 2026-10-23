@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,12 +27,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -69,6 +73,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -198,13 +203,21 @@ fun PlayerScreen(onNavigateUp: () -> Unit) {
                 label = "playerCenter"
             ) { asLyrics ->
                 if (!asLyrics) {
+                    // 封面+歌名整组在中部居中，歌名紧跟封面，底部留出按钮行的高度
                     Column(modifier = Modifier.fillMaxSize()) {
-                        // 封面铺满整宽展示；点击封面进入歌词
+                        Spacer(modifier = Modifier.weight(1f))
+                        // 封面：正方形卡片。原整幅铺满会把低分辨率封面放大到发糊，
+                        // 缩成正方形后展示面积更小、观感更锐利；点击区域仍是整块进入歌词
                         Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                                .clickable { showLyrics = true }
+                                .align(Alignment.CenterHorizontally)
+                                .fillMaxWidth(0.78f)
+                                .aspectRatio(1f)
+                                .shadow(24.dp, RoundedCornerShape(20.dp))
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(Color.White.copy(alpha = 0.10f))
+                                .clickable { showLyrics = true },
+                            contentAlignment = Alignment.Center
                         ) {
                             val artwork = state.current?.mediaMetadata?.artworkUri
                             if (artwork != null) {
@@ -215,19 +228,12 @@ fun PlayerScreen(onNavigateUp: () -> Unit) {
                                     modifier = Modifier.fillMaxSize()
                                 )
                             } else {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(Color.White.copy(alpha = 0.10f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.MusicNote,
-                                        contentDescription = null,
-                                        tint = Color.White.copy(alpha = 0.5f),
-                                        modifier = Modifier.size(96.dp)
-                                    )
-                                }
+                                Icon(
+                                    imageVector = Icons.Rounded.MusicNote,
+                                    contentDescription = null,
+                                    tint = Color.White.copy(alpha = 0.5f),
+                                    modifier = Modifier.size(72.dp)
+                                )
                             }
                         }
                         Spacer(modifier = Modifier.height(16.dp))
@@ -248,10 +254,13 @@ fun PlayerScreen(onNavigateUp: () -> Unit) {
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(horizontal = 32.dp)
                         )
+                        // 底部弹性空间稍大，保证歌名/歌手不压到左下歌词、右下收起按钮
+                        Spacer(modifier = Modifier.weight(1.15f))
                     }
                 } else {
                     Box(modifier = Modifier.fillMaxSize()) {
-                        // 歌词模式：整屏歌词（顶部不显示歌名），右上角「词」切回封面
+                        // 歌词模式：整屏歌词（顶部不显示歌名）。
+                        // 左下角封面切换/右下角收起按钮在 AnimatedContent 外常驻，见下方
                         LyricsView(
                             lines = lyrics,
                             currentIndex = when {
@@ -262,22 +271,27 @@ fun PlayerScreen(onNavigateUp: () -> Unit) {
                             onSeek = { position -> playerController.seekTo(position) },
                             modifier = Modifier.fillMaxSize()
                         )
-                        Text(
-                            text = "词",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = Color.White,
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(top = 48.dp, end = 20.dp)
-                                .clip(CircleShape)
-                                .background(Color.Black.copy(alpha = 0.35f))
-                                .clickable { showLyrics = false }
-                                .padding(horizontal = 14.dp, vertical = 6.dp)
-                        )
                     }
                 }
             }
-            // 收起按钮：常驻中心区右下角，向下箭头收起整个播放页
+            // 「词/图」切换：与右下角收起按钮同一水平线、位于封面/歌词下方左侧（一左一右）。
+            // 封面态显示歌词图标进歌词（点封面也可进）；歌词态显示封面图标切回
+            IconButton(
+                onClick = { showLyrics = !showLyrics },
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(12.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.35f))
+            ) {
+                Icon(
+                    imageVector = if (showLyrics) Icons.Rounded.Album else Icons.Rounded.Lyrics,
+                    contentDescription = if (showLyrics) "显示封面" else "显示歌词",
+                    tint = Color.White,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+            // 收起按钮：中心区右下角（与左下歌词/封面切换同一水平线），向下箭头收起整个播放页
             IconButton(
                 onClick = onNavigateUp,
                 modifier = Modifier
