@@ -14,12 +14,15 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.xmgo.music.R
 import com.xmgo.music.data.datastore.rememberOverlayLyricBgOpacity
 import com.xmgo.music.data.datastore.rememberOverlayLyricEnabled
@@ -54,6 +57,24 @@ private fun OverlayLyricSettingsContent() {
     var outline by rememberOverlayLyricOutline()
     val context = LocalContext.current
 
+    // 点了开关但尚未去授权：跳系统授权页前不落盘 true（否则没授权开关也显示开），
+    // 授权返回后由下方 ON_RESUME 校验，成功才真正打开。
+    var awaitingPermission by remember { mutableStateOf(false) }
+
+    LifecycleResumeEffect(Unit) {
+        if (awaitingPermission) {
+            awaitingPermission = false
+            if (OverlayLyricManager.hasOverlayPermission(context)) {
+                enabled = true
+            }
+            // 未授权返回：enabled 从未置 true，开关保持关，静默即可
+        } else if (enabled && !OverlayLyricManager.hasOverlayPermission(context)) {
+            // 权限被系统收回：把开关同步回真实状态，避免“显示开却不显示悬浮窗”
+            enabled = false
+        }
+        onPauseOrDispose { }
+    }
+
     SettingsWithTitle(title = R.string.overlay_lyric) {
         Card(
             colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surfaceContainer),
@@ -67,9 +88,18 @@ private fun OverlayLyricSettingsContent() {
                 description = stringResource(R.string.overlay_lyric_enabled_desc),
                 checked = enabled,
                 onCheckedChange = { on ->
-                    enabled = on
-                    if (on && !OverlayLyricManager.hasOverlayPermission(context)) {
-                        OverlayLyricManager.openOverlayPermissionSettings(context)
+                    if (on) {
+                        if (OverlayLyricManager.hasOverlayPermission(context)) {
+                            enabled = true
+                        } else {
+                            // 无权限：不落盘（开关保持关），先跳系统授权页；
+                            // 授权与否由返回后的 ON_RESUME 校验决定
+                            awaitingPermission = true
+                            OverlayLyricManager.openOverlayPermissionSettings(context)
+                        }
+                    } else {
+                        awaitingPermission = false
+                        enabled = false
                     }
                 }
             )

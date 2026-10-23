@@ -26,9 +26,11 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
- * 悬浮歌词管理器：读设置、申请悬浮窗权限、每 100ms 把播放状态推给
- * [OverlayLyricWindow]（对齐 qplayer PlaybackService 的 checkpoint tick）。
+ * 悬浮歌词管理器：读设置、每 100ms 把播放状态推给 [OverlayLyricWindow]
+ * （对齐 qplayer PlaybackService 的 checkpoint tick）。
  * 不做前台隐藏——对齐 qplayer：开关打开且有权限即显示。
+ * 权限申请入口只在悬浮歌词设置页开关处；这里无权限时静默跳过，
+ * 绝不自动跳系统授权页（否则冷启动每次都被拉去授权）。
  */
 class OverlayLyricManager(
     private val context: Context,
@@ -138,8 +140,16 @@ class OverlayLyricManager(
             return
         }
         if (!hasOverlayPermission(context)) {
-            // 用户从设置页打开总开关：跳系统授权页，回来后 DataStore 再 collect 时重挂
-            openOverlayPermissionSettings(context)
+            // 无权限：不显示、不跳系统授权页。授权入口只在设置页开关处
+            //（开关点击时跳转，返回后由设置页 ON_RESUME 校验并落盘）。
+            // 这里顺手把无权限却落盘的 true 修正为 false（旧版本可能留下脏状态），
+            // 避免开关“假开”；修正触发的新一轮 collect 走 enabled=false 分支，不会循环。
+            enabledState = false
+            OverlayLyricWindow.setWanted(context, false)
+            stopTick()
+            if (enabled) {
+                scope.launch { context.dataStore.edit { it[KEY_ENABLED] = false } }
+            }
             return
         }
         enabledState = true
