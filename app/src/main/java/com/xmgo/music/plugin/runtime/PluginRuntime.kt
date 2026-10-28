@@ -394,7 +394,9 @@ class PluginRuntime(
                         BridgeValue(isJson = false, value = cryptoBridge.dispatch(method, JSONObject(argsJson)))
                     method == "notifications.toast" -> {
                         val msg = JSONObject(argsJson).optString("message")
-                        if (shouldShowToast(msg)) {
+                        // unblock 换源提示（"已为该歌曲自动换源"）每首必弹、纯噪音：
+                        // 换源行为本身保留（音源解锁开着就是这个语义），只吞提示
+                        if (!msg.contains("自动换源") && shouldShowToast(msg)) {
                             android.os.Handler(android.os.Looper.getMainLooper()).post {
                                 android.widget.Toast.makeText(appContext, msg, android.widget.Toast.LENGTH_SHORT).show()
                             }

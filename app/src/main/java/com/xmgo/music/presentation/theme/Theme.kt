@@ -92,7 +92,13 @@ fun XmgoTheme(
 
     if (!view.isInEditMode) {
         LaunchedEffect(isDark) {
-            val window = (view.context as? Activity)?.window ?: return@LaunchedEffect
+            // view.context 可能是 ContextThemeWrapper 等包装，裸 as? Activity 会静默失败
+            // （状态栏设置从未执行）：遍历 ContextWrapper 找宿主 Activity
+            val activity = generateSequence(view.context) { base ->
+                (base as? android.content.ContextWrapper)?.baseContext
+            }.filterIsInstance<android.app.Activity>().firstOrNull()
+                ?: return@LaunchedEffect
+            val window = activity.window
             window.statusBarColor = Color.Transparent.toArgb()
             WindowInsetsControllerCompat(window, view).also { wic ->
                 wic.isAppearanceLightStatusBars = !isDark

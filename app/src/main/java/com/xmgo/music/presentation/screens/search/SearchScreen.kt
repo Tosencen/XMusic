@@ -312,6 +312,20 @@ fun SearchScreen(
                 error = e.message ?: e.toString()
             }
             loading = false
+            // 写入页面缓存：返回搜索页时命中即恢复，不再重搜。
+            // 注意 searchAll/loadMore 都要写：loadMore 的 cursor 更新也得进缓存
+            pageCache.put(
+                query.trim(), tab,
+                SearchSnapshot(
+                    songs = songs,
+                    artists = artists,
+                    albums = albums,
+                    songCursors = songCursors,
+                    artistCursors = artistCursors,
+                    albumCursors = albumCursors,
+                    error = error
+                )
+            )
         }
     }
 
@@ -406,14 +420,18 @@ fun SearchScreen(
         }
     }
 
-    // 输入防抖自动搜索
-    LaunchedEffect(query) {
+    // 搜索触发（query/tab 任一变化）：命中缓存直接恢复不重搜——
+    // 原先 query/tab 两个 LaunchedEffect 并发，返回页面时 tab 的无条件 searchAll
+    // 会把缓存恢复的结果又覆盖成重搜，合并为单入口统一走缓存判定
+    var lastSearchedQuery by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(query, tab) {
         if (query.isBlank()) {
             searchJob?.cancel()
             clearResults()
+            lastSearchedQuery = null
             return@LaunchedEffect
         }
-        // 返回本页：命中缓存直接恢复上次结果，免 400ms 防抖 + 全音源重搜
+        // 返回本页 / 切换类目回来：命中缓存直接恢复上次结果，免防抖 + 全音源重搜
         pageCache.snapshot(query, tab)?.let { cached ->
             songs = cached.songs
             artists = cached.artists
@@ -425,12 +443,11 @@ fun SearchScreen(
             loading = false
             return@LaunchedEffect
         }
-        delay(400)
+        // 输入防抖只作用于 query 变化；tab 切换立即搜（不等防抖）
+        val queryChanged = query != lastSearchedQuery
+        lastSearchedQuery = query
+        if (queryChanged) delay(400)
         searchAll()
-    }
-    // 切换类目自动重搜（输入已有时立即搜，不等防抖）
-    LaunchedEffect(tab) {
-        if (query.isNotBlank()) searchAll()
     }
 
     fun playOnline(index: Int) {
@@ -706,7 +723,13 @@ private fun SongResults(
         }
         return
     }
-    LazyColumn(contentPadding = PaddingValues(bottom = 32.dp)) {
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 32.dp)
+        ) {
         itemsIndexed(results, key = { _, it -> "${it.sourceId}:${it.rawId}" }) { index, song ->
             val mediaId = "${song.sourceId}:${song.rawId}"
             SongActionsMenu(
@@ -730,6 +753,13 @@ private fun SongResults(
             }
         }
         loadMoreItem(hasMore, onLoadMore)
+        }
+        com.xmgo.music.presentation.shared_components.ScrollToTopButton(
+            listState = listState,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 20.dp, bottom = 164.dp)
+        )
     }
 }
 
@@ -744,7 +774,13 @@ private fun ArtistResults(
         EmptyHint("没有找到相关歌手")
         return
     }
-    LazyColumn(contentPadding = PaddingValues(bottom = 32.dp)) {
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 32.dp)
+        ) {
         itemsIndexed(results, key = { _, it -> "${it.sourceId}:${it.artist.id}" }) { _, hit ->
             ResultRow(
                 artwork = hit.artist.artworkUrl,
@@ -758,6 +794,13 @@ private fun ArtistResults(
             )
         }
         loadMoreItem(hasMore, onLoadMore)
+        }
+        com.xmgo.music.presentation.shared_components.ScrollToTopButton(
+            listState = listState,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 20.dp, bottom = 164.dp)
+        )
     }
 }
 
@@ -772,7 +815,13 @@ private fun AlbumResults(
         EmptyHint("没有找到相关专辑")
         return
     }
-    LazyColumn(contentPadding = PaddingValues(bottom = 32.dp)) {
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 32.dp)
+        ) {
         itemsIndexed(results, key = { _, it -> "${it.sourceId}:${it.album.id}" }) { _, hit ->
             ResultRow(
                 artwork = hit.album.artworkUrl,
@@ -786,6 +835,13 @@ private fun AlbumResults(
             )
         }
         loadMoreItem(hasMore, onLoadMore)
+        }
+        com.xmgo.music.presentation.shared_components.ScrollToTopButton(
+            listState = listState,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 20.dp, bottom = 164.dp)
+        )
     }
 }
 
@@ -807,7 +863,7 @@ private fun ResultRow(
         Box(
             modifier = Modifier
                 .size(44.dp)
-                .clip(if (round) CircleShape else RoundedCornerShape(6.dp))
+                .clip(if (round) CircleShape else RoundedCornerShape(8.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
             if (artwork != null) {

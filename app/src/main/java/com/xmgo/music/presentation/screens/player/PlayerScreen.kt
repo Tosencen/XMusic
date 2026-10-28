@@ -10,6 +10,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
@@ -17,13 +18,17 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -66,6 +71,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -82,6 +88,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import coil3.compose.AsyncImage
 import com.xmgo.music.data.cache.CachedMusicStore
@@ -92,9 +99,12 @@ import com.xmgo.music.lyrics.LrcParser
 import com.xmgo.music.lyrics.LyricLine
 import com.xmgo.music.lyrics.LyricsRepository
 import com.xmgo.music.playback.PlayerController
+import kotlin.math.roundToInt
 import com.xmgo.music.presentation.shared_components.FluidBackground
 import com.xmgo.music.presentation.shared_components.stableKeys
 import com.xmgo.music.utils.XmgoTheme
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.koin.compose.getKoin
 
@@ -179,14 +189,36 @@ fun PlayerScreen(onNavigateUp: () -> Unit) {
         MaterialTheme.colorScheme.primary,
         MaterialTheme.colorScheme.tertiary
     )
+    // 视觉底部弹窗：顶部让出竖向 10%（弹窗 = 竖向 90%，间距含状态栏余量），
+    // 内容区圆角上浮，画布只画内容区 → 圆角边缘即弹窗分界
+    val topGap = androidx.compose.ui.platform.LocalConfiguration.current.let {
+        androidx.compose.ui.unit.Dp(it.screenHeightDp * 0.10f)
+    }
+    // 把手拖拽跟手位移（下滑关闭：过阈值退出，否则弹簧回位）
+    val sheetDrag = remember { androidx.compose.animation.core.Animatable(0f) }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0B0B0F))
+    )
     FluidBackground(
         artworkUri = state.current?.mediaMetadata?.artworkUri,
         fallbackColors = fallbackColors,
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier
+            .fillMaxSize()
+            .offset { androidx.compose.ui.unit.IntOffset(0, sheetDrag.value.roundToInt()) }
+            .padding(top = topGap)
+            .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
     )
 
     // 封面从屏幕顶端铺起；返回按钮悬浮于封面左上
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .offset { androidx.compose.ui.unit.IntOffset(0, sheetDrag.value.roundToInt()) }
+            .padding(top = topGap)
+            .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+    ) {
 
         // 中部：封面（铺满置顶）或 歌词
         BoxWithConstraints(
@@ -301,6 +333,63 @@ fun PlayerScreen(onNavigateUp: () -> Unit) {
                     contentDescription = "收起播放页",
                     tint = Color.White,
                     modifier = Modifier.size(28.dp)
+                )
+            }
+            // 顶部 scrim 区点击关闭：负偏移盖住弹窗上方的 scrim 带
+            // （本 Box 的父顶=弹窗顶，不能正向 padding topGap——会双重偏移）
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .offset(y = -topGap)
+                    .height(topGap)
+                    .clickable(onClick = onNavigateUp)
+            )
+            // 下滑把手：命中区大于横条（好按），拖动整个弹窗跟手下移，
+            // 过阈值关闭、不足弹簧回位（与下滑关闭手势同语义）
+            Box(
+                contentAlignment = Alignment.TopCenter,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .width(64.dp)
+                    .height(32.dp)
+                    .pointerInput(Unit) {
+                        var totalDrag = 0f
+                        val threshold = 120.dp.toPx()
+                        detectVerticalDragGestures(
+                            onDragStart = { totalDrag = 0f },
+                            onDragEnd = {
+                                if (totalDrag > threshold) {
+                                    onNavigateUp()
+                                } else {
+                                    scope.launch {
+                                        sheetDrag.animateTo(
+                                            0f,
+                                            androidx.compose.animation.core.spring()
+                                        )
+                                    }
+                                }
+                            },
+                            onVerticalDrag = { _, dragAmount ->
+                                totalDrag += dragAmount
+                                if (dragAmount > 0f) {
+                                    scope.launch {
+                                        sheetDrag.snapTo(
+                                            (sheetDrag.value + dragAmount).coerceAtLeast(0f)
+                                        )
+                                    }
+                                }
+                            }
+                        )
+                    }
+            ) {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 8.dp)
+                        .width(36.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color.White.copy(alpha = 0.8f))
                 )
             }
         }
@@ -673,8 +762,8 @@ private fun PlayerProgressBar(
 }
 
 /**
- * 歌词面板：内部收集高频进度流计算当前行索引，
- * 歌词行随播放推进高亮/滚动时仅本组合重组。
+ * 歌词面板：独立高频 tick（120ms）读实时进度算当前行索引，
+ * 只在切行时重组（positionMs 流 500ms 粒度会慢一句，不能用）。
  */
 @Composable
 private fun LyricsPane(
@@ -685,9 +774,15 @@ private fun LyricsPane(
     playerController: PlayerController,
     modifier: Modifier = Modifier
 ) {
-    val positionMs by playerController.positionMs.collectAsState()
-    val lyricIndex = remember(lyrics, positionMs) {
-        LrcParser.currentIndex(lyrics, positionMs)
+    var lyricIndex by remember(lyrics) {
+        mutableIntStateOf(LrcParser.currentIndex(lyrics, playerController.livePositionMs()))
+    }
+    LaunchedEffect(lyrics) {
+        while (isActive) {
+            val idx = LrcParser.currentIndex(lyrics, playerController.livePositionMs())
+            if (idx != lyricIndex) lyricIndex = idx
+            delay(120)
+        }
     }
     LyricsView(
         lines = lyrics,

@@ -189,13 +189,16 @@ object OverlayLyricWindow {
             p.x = prefs.getInt("x", Math.round(16 * d))
             p.y = prefs.getInt("y", Math.round(dm.heightPixels * 0.72f))
             params = p
-            applyStyle()
             try {
                 wm.addView(container, p)
                 view = v
                 root = container
                 bar = cb
                 attached = true
+                // 必须在 view 赋值后调：applyStyle 首行 view ?: return，
+                // 提前调会被 null 挡掉 → 首次/重启用走 LyricView 字段默认值（样式不对），
+                // 只有后续 restyle（调参数）才修正
+                applyStyle()
             } catch (_: Throwable) {
                 attached = false
                 view = null

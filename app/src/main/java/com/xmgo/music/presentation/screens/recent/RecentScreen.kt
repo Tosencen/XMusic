@@ -105,6 +105,7 @@ fun RecentScreen(onNavigateUp: () -> Unit) {
         }).sortedByDescending { it.playedAt }
     }
 
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     Scaffold(
         topBar = {
             TopAppBar(
@@ -132,6 +133,12 @@ fun RecentScreen(onNavigateUp: () -> Unit) {
                     }
                 }
             )
+        },
+        floatingActionButton = {
+            com.xmgo.music.presentation.shared_components.ScrollToTopButton(
+                listState = listState,
+                modifier = Modifier.padding(bottom = 164.dp)
+            )
         }
     ) { padding ->
         Column(
@@ -150,6 +157,7 @@ fun RecentScreen(onNavigateUp: () -> Unit) {
                 )
             } else {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = MiniPlayerBottomReserve)
                 ) {

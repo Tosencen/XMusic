@@ -94,7 +94,9 @@ private fun SongActionsDropdown(
     DropdownMenu(
         expanded = true,
         onDismissRequest = onDismiss,
-        modifier = Modifier.width(220.dp)
+        modifier = Modifier.width(220.dp),
+        // 对齐 app 浮层圆角规范（默认 Menu 圆角仅 4dp，太小）
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
     ) {
         DropdownMenuItem(
             text = { Text(if (isFavorite) "取消收藏" else "收藏") },

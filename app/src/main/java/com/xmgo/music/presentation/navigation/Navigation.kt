@@ -241,7 +241,7 @@ fun Nav() {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 24.dp)
+                    .padding(bottom = 56.dp)
                     .navigationBarsPadding()
             ) {
                 MiniPlayer(

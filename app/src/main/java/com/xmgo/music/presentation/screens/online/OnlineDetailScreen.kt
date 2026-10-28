@@ -109,11 +109,13 @@ fun OnlineDetailScreen(
 
     LaunchedEffect(sourceId, id, kind) {
         val cacheKey = OnlineDetailCache.keyOf(kind, sourceId, id)
-        // 返回本页：命中缓存先展示，后台静默刷新
+        // 返回本页：命中缓存直接恢复，不再后台刷新（用户要求返回不自动刷新）
         detailCache.get(cacheKey)?.let { cached ->
             detail = cached
             loading = false
-        } ?: run { loading = true }
+            return@LaunchedEffect
+        }
+        loading = true
         error = null
         try {
             val provider = pluginManager.providerFor(sourceId)
@@ -180,6 +182,12 @@ fun OnlineDetailScreen(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
+            )
+        },
+        floatingActionButton = {
+            com.xmgo.music.presentation.shared_components.ScrollToTopButton(
+                listState = listState,
+                modifier = Modifier.padding(bottom = 164.dp)
             )
         }
     ) { padding ->
@@ -353,7 +361,7 @@ private fun CollectionHeader(
             Box(
                 modifier = Modifier
                     .size(110.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 if (detail.artworkUrl != null) {
@@ -453,7 +461,7 @@ private fun DetailSkeleton() {
                     SkeletonBlock(
                         alpha = pulse,
                         modifier = Modifier.size(110.dp),
-                        shape = RoundedCornerShape(10.dp)
+                        shape = RoundedCornerShape(12.dp)
                     )
                     Spacer(modifier = Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
@@ -552,7 +560,7 @@ private fun AlbumCard(album: OnlineAlbum, onClick: () -> Unit) {
         Box(
             modifier = Modifier
                 .size(112.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(12.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
             if (album.artworkUrl != null) {

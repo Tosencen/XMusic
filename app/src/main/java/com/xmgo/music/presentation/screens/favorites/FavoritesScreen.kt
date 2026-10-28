@@ -63,6 +63,7 @@ fun FavoritesScreen(onNavigateUp: () -> Unit) {
 
     val staged = rememberStagedPlayer(pluginManager, playerController, cachedMusicStore)
 
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     Scaffold(
         topBar = {
             TopAppBar(
@@ -76,6 +77,12 @@ fun FavoritesScreen(onNavigateUp: () -> Unit) {
                     }
                 }
             )
+        },
+        floatingActionButton = {
+            com.xmgo.music.presentation.shared_components.ScrollToTopButton(
+                listState = listState,
+                modifier = Modifier.padding(bottom = 164.dp)
+            )
         }
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize()) {
@@ -88,6 +95,7 @@ fun FavoritesScreen(onNavigateUp: () -> Unit) {
                 )
             } else {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding),

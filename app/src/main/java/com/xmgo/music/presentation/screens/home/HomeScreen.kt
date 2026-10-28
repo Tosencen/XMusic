@@ -39,6 +39,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -48,10 +49,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.xmgo.music.data.datastore.rememberPrimarySource
@@ -63,6 +67,7 @@ import com.xmgo.music.plugin.model.HomeContent
 import com.xmgo.music.plugin.model.OnlinePlaylist
 import com.xmgo.music.plugin.model.Song
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import com.xmgo.music.presentation.login.LoginDialog
 import com.xmgo.music.presentation.shared_components.CircleBackdropWavyIndicator
@@ -108,7 +113,9 @@ fun HomeScreen(
     var homeContent by remember { mutableStateOf<HomeContent?>(cached.content) }
     var loading by remember { mutableStateOf(cached.content == null) }
     var error by remember { mutableStateOf<String?>(null) }
-    var refreshTick by remember { mutableIntStateOf(0) }
+    // rememberSaveable：返回本页时恢复 tick 值，缓存判定（refreshTick == snapshot.tick）
+    // 才能命中——plain remember 返回重建后归 0，会被误判为需要重新拉取
+    var refreshTick by rememberSaveable { mutableIntStateOf(0) }
     var showLogin by remember { mutableStateOf(false) }
     var account by remember { mutableStateOf<AccountInfo?>(cached.account) }
     // 当前展示内容所属音源：切主音源才清空旧内容，同音源下拉刷新保留旧内容原地换新
@@ -233,6 +240,10 @@ fun HomeScreen(
         LaunchedEffect(loading) {
             if (!loading) refreshing = false
         }
+        // 跟手位移：PullToRefreshBox 默认 indicator 浮层不推内容（社区大量抱怨的非 iOS 行为），
+        // 这里用 distanceFraction 驱动内容下移 + indicator 跟随内容顶部，松手自动回弹
+        val maxPullPx = with(LocalDensity.current) { 112.dp.toPx() }
+        val contentOffsetPx = refreshState.distanceFraction * maxPullPx
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -249,13 +260,27 @@ fun HomeScreen(
                     error = null
                     refreshTick++
                 },
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                indicator = {
+                    PullToRefreshDefaults.Indicator(
+                        state = refreshState,
+                        isRefreshing = refreshing,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .offset { IntOffset(0, (contentOffsetPx / 2f).toInt()) }
+                    )
+                }
             ) {
+                Box(modifier = Modifier.offset { IntOffset(0, contentOffsetPx.toInt()) }) {
                 when {
                     loading && content == null -> Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
-                    ) { CircleBackdropWavyIndicator() }
+                    ) {
+                        CircleBackdropWavyIndicator(
+                            modifier = Modifier.offset(y = (-96).dp)
+                        )
+                    }
 
                 primary == null -> EmptyState(
                     title = "未安装音源插件",
@@ -324,6 +349,7 @@ fun HomeScreen(
                     }
                 }
                 }
+                }
             }
         }
     }
@@ -360,6 +386,35 @@ private fun HomeContentList(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = MiniPlayerBottomReserve)
     ) {
+        if (content.songs.isNotEmpty()) {
+            item(key = "hdr_每日推荐") { SectionHeader("每日推荐") }
+            itemsIndexed(
+                content.songs,
+                key = { index, _ -> songKeys[index] }
+            ) { index, song ->
+                val mediaId = "${song.sourceId}:${song.rawId}"
+                SongActionsMenu(
+                    song = song,
+                    expanded = actionsSong == song,
+                    onDismiss = onDismissActions
+                ) {
+                    SongRow(
+                        title = song.name,
+                        artworkUrl = song.artworkUrl,
+                        subtitle = listOfNotNull(
+                            song.artists.joinToString(" / ").ifEmpty { null },
+                            song.album
+                        ).joinToString(" · "),
+                        durationMs = song.durationMs,
+                        isCurrent = playerState.current?.mediaId == mediaId,
+                        isPlaying = playerState.isPlaying && playerState.current?.mediaId == mediaId,
+                        onLongClick = { onLongPressSong(song) },
+                        onClick = { onPlaySong(index) }
+                    )
+                }
+            }
+        }
+
         content.sections.forEach { section ->
             item(key = "hdr_${section.title}") {
                 SectionHeader(section.title)
@@ -398,35 +453,6 @@ private fun HomeContentList(
                     if (chunk.size == 1) Spacer(modifier = Modifier.weight(1f))
                 }
                 Spacer(modifier = Modifier.height(12.dp))
-            }
-        }
-
-        if (content.songs.isNotEmpty()) {
-            item(key = "hdr_每日推荐") { SectionHeader("每日推荐") }
-            itemsIndexed(
-                content.songs,
-                key = { index, _ -> songKeys[index] }
-            ) { index, song ->
-                val mediaId = "${song.sourceId}:${song.rawId}"
-                SongActionsMenu(
-                    song = song,
-                    expanded = actionsSong == song,
-                    onDismiss = onDismissActions
-                ) {
-                    SongRow(
-                        title = song.name,
-                        artworkUrl = song.artworkUrl,
-                        subtitle = listOfNotNull(
-                            song.artists.joinToString(" / ").ifEmpty { null },
-                            song.album
-                        ).joinToString(" · "),
-                        durationMs = song.durationMs,
-                        isCurrent = playerState.current?.mediaId == mediaId,
-                        isPlaying = playerState.isPlaying && playerState.current?.mediaId == mediaId,
-                        onLongClick = { onLongPressSong(song) },
-                        onClick = { onPlaySong(index) }
-                    )
-                }
             }
         }
 
@@ -491,7 +517,7 @@ private fun PlaylistCard(playlist: OnlinePlaylist, modifier: Modifier = Modifier
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .clip(RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(12.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
             if (playlist.artworkUrl != null) {

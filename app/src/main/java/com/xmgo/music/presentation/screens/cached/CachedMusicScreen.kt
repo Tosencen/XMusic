@@ -28,7 +28,10 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.Repeat
+import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.SelectAll
+import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
@@ -69,6 +72,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import com.xmgo.music.data.cache.CachedMusicGroup
 import com.xmgo.music.data.cache.CachedMusicStore
 import com.xmgo.music.data.cache.CachedSongEntry
+import androidx.media3.common.Player
 import com.xmgo.music.data.datastore.FavoritesStore
 import com.xmgo.music.playback.PlayerController
 import com.xmgo.music.plugin.PluginManager
@@ -135,6 +139,7 @@ fun CachedMusicScreen(onNavigateUp: () -> Unit) {
     val displaySongs = remember(displayEntries) { displayEntries.map { it.song } }
     val selected = selection ?: emptySet()
     val inMultiSelect = selection != null
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 
     fun playAt(index: Int) {
         if (displaySongs.isEmpty()) return
@@ -182,6 +187,23 @@ fun CachedMusicScreen(onNavigateUp: () -> Unit) {
                         }
                     },
                     actions = {
+                        // 播放模式三态切换：顺序 → 随机 → 单曲循环
+                        IconButton(onClick = { playerController.cyclePlayMode() }) {
+                            Icon(
+                                imageVector = when {
+                                    playerState.shuffleEnabled -> Icons.Rounded.Shuffle
+                                    playerState.repeatMode == Player.REPEAT_MODE_ONE ->
+                                        Icons.Rounded.RepeatOne
+                                    else -> Icons.Rounded.Repeat
+                                },
+                                contentDescription = when {
+                                    playerState.shuffleEnabled -> "随机播放，点击切换单曲循环"
+                                    playerState.repeatMode == Player.REPEAT_MODE_ONE ->
+                                        "单曲循环，点击切换顺序播放"
+                                    else -> "顺序播放，点击切换随机播放"
+                                }
+                            )
+                        }
                         IconButton(onClick = {
                             nameDialogText = ""
                             nameDialogError = null
@@ -196,44 +218,14 @@ fun CachedMusicScreen(onNavigateUp: () -> Unit) {
                 )
             }
         },
-        bottomBar = {
-            if (inMultiSelect) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                        .padding(horizontal = 24.dp, vertical = 8.dp)
-                        // 有播放中歌曲时 MiniPlayer 悬浮条会盖住底栏，预留其高度
-                        .padding(bottom = if (playerState.current != null) 88.dp else 0.dp)
-                        .navigationBarsPadding(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    TextButton(
-                        onClick = { pendingRemoveMany = true },
-                        enabled = selected.isNotEmpty()
-                    ) {
-                        Icon(
-                            Icons.Rounded.Delete,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("删除")
-                    }
-                    TextButton(
-                        onClick = { moveToGroup = true },
-                        enabled = selected.isNotEmpty()
-                    ) {
-                        Icon(
-                            Icons.Rounded.PlaylistAdd,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("移动到分组")
-                    }
-                }
-            }
+        bottomBar = {},
+        floatingActionButton = {
+            // 多选模式隐藏：底部视觉让位给列表上方的操作栏
+            com.xmgo.music.presentation.shared_components.ScrollToTopButton(
+                listState = listState,
+                modifier = Modifier.padding(bottom = 164.dp),
+                visible = !inMultiSelect
+            )
         }
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
@@ -251,6 +243,41 @@ fun CachedMusicScreen(onNavigateUp: () -> Unit) {
                     },
                     onDelete = { deleteGroup = it }
                 )
+            } else {
+                // 多选操作栏：放音乐列表上方（原在底部，与 MiniPlayer 抢位）
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.secondaryContainer)
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(
+                        onClick = { pendingRemoveMany = true },
+                        enabled = selected.isNotEmpty()
+                    ) {
+                        Icon(
+                            Icons.Rounded.Delete,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("删除")
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    TextButton(
+                        onClick = { moveToGroup = true },
+                        enabled = selected.isNotEmpty()
+                    ) {
+                        Icon(
+                            Icons.Rounded.PlaylistAdd,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("移动到分组")
+                    }
+                }
             }
             if (displayEntries.isEmpty()) {
                 EmptyState(
@@ -261,6 +288,7 @@ fun CachedMusicScreen(onNavigateUp: () -> Unit) {
                 )
             } else {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = MiniPlayerBottomReserve)
                 ) {
@@ -278,6 +306,7 @@ fun CachedMusicScreen(onNavigateUp: () -> Unit) {
                                     song.album
                                 ).joinToString(" · "),
                                 durationMs = song.durationMs,
+                                showDuration = !inMultiSelect,
                                 isCurrent = playerState.current?.mediaId == mediaId,
                                 isPlaying = playerState.isPlaying &&
                                     playerState.current?.mediaId == mediaId,

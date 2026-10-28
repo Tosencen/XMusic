@@ -436,6 +436,25 @@ class PlayerController(
         persist()
     }
 
+    /** 播放模式三态循环：顺序 → 随机 → 单曲循环 → 顺序。 */
+    fun cyclePlayMode() {
+        val c = controller ?: return
+        when {
+            c.shuffleModeEnabled -> {
+                c.shuffleModeEnabled = false
+                c.repeatMode = Player.REPEAT_MODE_ONE
+            }
+            c.repeatMode == Player.REPEAT_MODE_ONE -> {
+                c.repeatMode = Player.REPEAT_MODE_OFF
+            }
+            else -> {
+                c.shuffleModeEnabled = true
+            }
+        }
+        syncFromPlayer()
+        persist()
+    }
+
     /**
      * 实时播放位置（须在主线程调用，MediaController 约束）。
      * 悬浮歌词 tick 用：绕开 [ui] 500ms 轮询的陈旧度，扫色才平滑。

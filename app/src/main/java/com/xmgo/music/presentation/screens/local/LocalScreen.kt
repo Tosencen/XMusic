@@ -88,6 +88,7 @@ fun LocalScreen(
         repository.observeLibrary().collect { /* 变化时自动重扫 */ }
     }
 
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     Scaffold(
         topBar = {
             TopAppBar(
@@ -100,6 +101,12 @@ fun LocalScreen(
                         )
                     }
                 }
+            )
+        },
+        floatingActionButton = {
+            com.xmgo.music.presentation.shared_components.ScrollToTopButton(
+                listState = listState,
+                modifier = Modifier.padding(bottom = 164.dp)
             )
         }
     ) { padding ->
@@ -137,6 +144,7 @@ fun LocalScreen(
                 }
             } else {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = MiniPlayerBottomReserve)
                 ) {
