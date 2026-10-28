@@ -2,8 +2,8 @@ package com.xmgo.music.overlay
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.content.Intent
 import android.content.SharedPreferences
+import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -19,10 +19,12 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.widget.ImageView
+import android.widget.LinearLayout
 import androidx.compose.ui.graphics.toArgb
+import com.xmgo.music.R
 import com.xmgo.music.lyrics.LrcParser
 import com.xmgo.music.lyrics.LyricLine
-import com.xmgo.music.presentation.MainActivity
 import com.xmgo.music.presentation.theme.AppThemePalette
 
 /**
@@ -42,12 +44,28 @@ object OverlayLyricWindow {
         val lines: List<LyricLine> = emptyList(),
         val positionMs: Long = 0L,
         /** [System.nanoTime] 于帧推入时刻；绘制时按 playing 外推，扫色不再按 tick 跳步。 */
-        val receivedAtNs: Long = 0L
+        val receivedAtNs: Long = 0L,
+        /** 当前曲是否已收藏 / 是否可收藏（本地歌不可）。 */
+        val favorite: Boolean = false,
+        val canFavorite: Boolean = false
     )
+
+    /** 操作栏动作回调（由 [OverlayLyricManager] 实现）。 */
+    interface Actions {
+        fun onPrevious()
+        fun onPlayPause()
+        fun onNext()
+        fun onToggleFavorite()
+        fun onFontDelta(delta: Int)
+        fun onLock()
+        fun onOpenApp()
+        fun onClose()
+    }
 
     @Volatile private var wanted = false
     @Volatile private var frame: Frame = Frame()
     @Volatile private var style: OverlayStyle = OverlayStyle()
+    @Volatile private var actions: Actions? = null
 
     private var instance: OverlayWindowInstance? = null
     private val main = Handler(Looper.getMainLooper())
@@ -69,6 +87,10 @@ object OverlayLyricWindow {
     }
 
     fun isWanted(): Boolean = wanted
+
+    fun setActions(a: Actions?) {
+        actions = a
+    }
 
     fun restyle(newStyle: OverlayStyle) {
         style = newStyle
@@ -112,6 +134,9 @@ object OverlayLyricWindow {
             app.getSharedPreferences("overlay.lyric", Context.MODE_PRIVATE)
 
         private var view: LyricView? = null
+        private var root: LinearLayout? = null
+        private var bar: ControlBar? = null
+        private val autoHide = Runnable { setBarVisible(false) }
         private var params: WindowManager.LayoutParams? = null
         private var attached = false
         private var downRawX = 0f
@@ -131,6 +156,19 @@ object OverlayLyricWindow {
 
             val v = LyricView(app)
             v.setOnTouchListener { _, event -> onTouch(event) }
+            val cb = ControlBar(app) { scheduleAutoHide() }
+            cb.visibility = View.GONE
+            val container = LinearLayout(app).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(v, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ))
+                addView(cb, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = Math.round(6 * d) })
+            }
 
             @Suppress("DEPRECATION")
             val type = if (Build.VERSION.SDK_INT >= 26) {
@@ -153,12 +191,16 @@ object OverlayLyricWindow {
             params = p
             applyStyle()
             try {
-                wm.addView(v, p)
+                wm.addView(container, p)
                 view = v
+                root = container
+                bar = cb
                 attached = true
             } catch (_: Throwable) {
                 attached = false
                 view = null
+                root = null
+                bar = null
             }
         }
 
@@ -176,10 +218,12 @@ object OverlayLyricWindow {
             p.flags = flags
             if (attached) {
                 try {
-                    wm.updateViewLayout(v, p)
+                    wm.updateViewLayout(root ?: v, p)
                 } catch (_: Throwable) {
                 }
+                bar?.applyPalette()
             }
+            if (s.locked) setBarVisible(false)
         }
 
         fun hide() {
@@ -190,12 +234,15 @@ object OverlayLyricWindow {
                 return
             }
             v.stop()
+            main.removeCallbacks(autoHide)
             try {
-                wm.removeView(v)
+                wm.removeView(root ?: v)
             } catch (_: Throwable) {
             }
             attached = false
             view = null
+            root = null
+            bar = null
         }
 
         @SuppressLint("ClickableViewAccessibility")
@@ -218,7 +265,7 @@ object OverlayLyricWindow {
                         p.x = downX + Math.round(dx)
                         p.y = downY + Math.round(dy)
                         try {
-                            wm.updateViewLayout(view, p)
+                            wm.updateViewLayout(root ?: view, p)
                         } catch (_: Throwable) {
                         }
                     }
@@ -228,19 +275,37 @@ object OverlayLyricWindow {
                     if (dragging) {
                         prefs.edit().putInt("x", p.x).putInt("y", p.y).apply()
                     } else {
-                        val open = Intent(app, MainActivity::class.java).apply {
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                        }
-                        try {
-                            app.startActivity(open)
-                        } catch (_: Throwable) {
-                        }
+                        // 单击切换操作栏显隐（打开 App 由操作栏 ↗ 按钮承担）
+                        setBarVisible(bar?.visibility != View.VISIBLE)
                     }
                     dragging = false
                     return true
                 }
                 else -> return false
             }
+        }
+
+        private fun setBarVisible(show: Boolean) {
+            val b = bar ?: return
+            main.removeCallbacks(autoHide)
+            if (show && style.locked) return
+            b.visibility = if (show) View.VISIBLE else View.GONE
+            if (show) {
+                b.applyPalette()
+                b.refresh(frame)
+                scheduleAutoHide()
+            }
+            // 高度变化后刷新窗口，防止操作栏被屏幕底部截断
+            val p = params
+            val r = root
+            if (attached && p != null && r != null) {
+                try { wm.updateViewLayout(r, p) } catch (_: Throwable) {}
+            }
+        }
+
+        private fun scheduleAutoHide() {
+            main.removeCallbacks(autoHide)
+            main.postDelayed(autoHide, BAR_AUTO_HIDE_MS)
         }
 
         fun update() {
@@ -252,6 +317,83 @@ object OverlayLyricWindow {
                 if (canDraw(app)) show() else return
             }
             view?.bind()
+            val b = bar
+            if (b != null && b.visibility == View.VISIBLE) b.refresh(frame)
+        }
+    }
+
+    private const val BAR_AUTO_HIDE_MS = 3500L
+
+    // ---------------------------------------------------------------- 操作栏
+
+    /** 单击歌词后在下方出现的操作栏：上一首/播放暂停/下一首/收藏/字号/锁定/打开应用/关闭。 */
+    private class ControlBar(context: Context, private val onInteract: () -> Unit) :
+        LinearLayout(context) {
+
+        private val density = context.resources.displayMetrics.density
+        private val bg = android.graphics.drawable.GradientDrawable()
+
+        // buttons 必须先于 playBtn/favBtn 初始化：button() 会往 buttons.add，
+        // Kotlin 属性按声明顺序初始化，放在后面会在构造 playBtn 时 NPE
+        private val buttons = mutableListOf<ImageView>()
+        private val playBtn = button(R.drawable.ic_play_arrow, "播放/暂停") { actions?.onPlayPause() }
+        private val favBtn = button(R.drawable.ic_favorite_border, "收藏") { actions?.onToggleFavorite() }
+
+        init {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER
+            val pad = Math.round(6 * density)
+            setPadding(pad, pad, pad, pad)
+            bg.cornerRadius = 16f * density
+            background = bg
+            add(button(R.drawable.ic_skip_previous, "上一首") { actions?.onPrevious() })
+            add(playBtn)
+            add(button(R.drawable.ic_skip_next, "下一首") { actions?.onNext() })
+            add(favBtn)
+            add(button(R.drawable.ic_text_decrease, "字号减小") { actions?.onFontDelta(-1) })
+            add(button(R.drawable.ic_text_increase, "字号增大") { actions?.onFontDelta(1) })
+            add(button(R.drawable.ic_lock, "锁定") { actions?.onLock() })
+            add(button(R.drawable.ic_open_in_new, "打开应用") { actions?.onOpenApp() })
+            add(button(R.drawable.ic_close, "关闭") { actions?.onClose() })
+            applyPalette()
+        }
+
+        private fun add(b: ImageView) {
+            addView(b, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+        }
+
+        private fun button(iconRes: Int, desc: String, onClick: () -> Unit): ImageView =
+            ImageView(context).apply {
+                setImageResource(iconRes)
+                scaleType = ImageView.ScaleType.CENTER
+                contentDescription = desc
+                val v = Math.round(8 * density)
+                setPadding(0, v, 0, v)
+                setOnClickListener {
+                    onInteract()
+                    onClick()
+                }
+                buttons.add(this)
+            }
+
+        fun applyPalette() {
+            val scheme = AppThemePalette.scheme
+            val dark = style.dark
+            val surface = scheme?.surfaceContainerHigh?.toArgb()
+                ?: if (dark) 0xFF28282B.toInt() else 0xFFE9E7EC.toInt()
+            val fg = scheme?.onSurface?.toArgb()
+                ?: if (dark) 0xFFE6E0E9.toInt() else 0xFF1D1B20.toInt()
+            bg.setColor(surface)
+            bg.alpha = Math.round((style.bgOpacity.coerceAtLeast(0.7f)) * 255f)
+            buttons.forEach { it.imageTintList = ColorStateList.valueOf(fg) }
+        }
+
+        fun refresh(f: Frame) {
+            playBtn.setImageResource(if (f.playing) R.drawable.ic_pause else R.drawable.ic_play_arrow)
+            favBtn.visibility = if (f.canFavorite) View.VISIBLE else View.GONE
+            favBtn.setImageResource(
+                if (f.favorite) R.drawable.ic_favorite else R.drawable.ic_favorite_border
+            )
         }
     }
 

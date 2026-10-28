@@ -19,31 +19,47 @@ class FavoritesStore(private val dataStore: DataStore<Preferences>) {
 
     private val key = stringPreferencesKey("favorites_json")
     private val json = Json { ignoreUnknownKeys = true }
+    private val listSerializer = kotlinx.serialization.builtins.ListSerializer(Song.serializer())
 
     val favorites: Flow<List<Song>> = dataStore.data.map { prefs ->
-        prefs[key]?.let { raw ->
-            runCatching { json.decodeFromString<List<Song>>(raw) }.getOrNull()
-        } ?: emptyList()
+        decodeListOrNull(json, prefs[key], listSerializer) ?: emptyList()
     }
 
     suspend fun setFavorite(song: Song, favorite: Boolean) {
         dataStore.edit { prefs ->
-            val current = prefs[key]?.let { raw ->
-                runCatching { json.decodeFromString<List<Song>>(raw) }.getOrNull()
-            } ?: emptyList()
+            val current = decodeListOrNull(json, prefs[key], listSerializer)
+                ?: return@edit // 原值损坏：不覆盖，避免用户收藏被空列表清掉
             val target = mediaIdOf(song)
             val next = if (favorite) {
                 if (current.any { mediaIdOf(it) == target }) current else current + song
             } else {
                 current.filterNot { mediaIdOf(it) == target }
             }
-            prefs[key] = json.encodeToString(next)
+            prefs[key] = json.encodeToString(listSerializer, next)
         }
     }
 
     companion object {
         fun mediaIdOf(song: Song): String = "${song.sourceId}:${song.rawId}"
     }
+}
+
+/**
+ * 解码 DataStore 中的 JSON 列表。
+ * 返回 null 表示"原值存在但解码失败"——写入方必须保留原 raw 不覆盖，
+ * 否则一次字段不兼容会让用户数据被空列表永久清掉。
+ */
+internal fun <T> decodeListOrNull(
+    json: Json,
+    raw: String?,
+    serializer: kotlinx.serialization.DeserializationStrategy<List<T>>
+): List<T>? {
+    if (raw == null) return emptyList()
+    return runCatching { json.decodeFromString(serializer, raw) }
+        .onFailure {
+            android.util.Log.w("DataStore", "列表解码失败，保留原值不覆盖", it)
+        }
+        .getOrNull()
 }
 
 /** 在线 MediaItem（mediaId = sourceId:rawId）→ 可收藏/可再播放的 [Song]。 */

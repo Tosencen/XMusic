@@ -6,15 +6,20 @@ import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.widget.Toast
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import com.xmgo.music.data.datastore.FavoritesStore
 import com.xmgo.music.data.datastore.PreferencesKeys
 import com.xmgo.music.data.datastore.dataStore
+import com.xmgo.music.data.datastore.toSongOrNull
 import com.xmgo.music.lyrics.LyricLine
 import com.xmgo.music.lyrics.LyricsRepository
 import com.xmgo.music.playback.PlayerController
+import com.xmgo.music.presentation.MainActivity
 import com.xmgo.music.presentation.theme.AppThemePalette
+import com.xmgo.music.plugin.model.Song
 import com.xmgo.music.utils.XmgoTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,7 +40,8 @@ import kotlinx.coroutines.launch
 class OverlayLyricManager(
     private val context: Context,
     private val playerController: PlayerController,
-    private val lyricsRepository: LyricsRepository
+    private val lyricsRepository: LyricsRepository,
+    private val favoritesStore: FavoritesStore
 ) {
     companion object {
         val KEY_ENABLED = booleanPreferencesKey("overlay_lyric_enabled")
@@ -78,7 +84,12 @@ class OverlayLyricManager(
     @Volatile
     private var cachedMediaId: String? = null
 
+    @Volatile
+    private var cachedFavorites: List<Song> = emptyList()
+
     init {
+        // 绑定操作栏动作（上一首/播放暂停/下一首/收藏/字号/锁定/打开应用/关闭）
+        OverlayLyricWindow.setActions(bindActions())
         // 设置变化 → 开关/重刷悬浮窗
         scope.launch {
             context.dataStore.data
@@ -113,6 +124,51 @@ class OverlayLyricManager(
                     }.getOrDefault(emptyList())
                 }
             }
+        }
+        // 收藏列表变化 → 缓存给 tick 计算 favorite/canFavorite
+        scope.launch {
+            favoritesStore.favorites.collect { cachedFavorites = it }
+        }
+    }
+
+    private fun bindActions(): OverlayLyricWindow.Actions = object : OverlayLyricWindow.Actions {
+        override fun onPrevious() = playerController.previous()
+        override fun onPlayPause() = playerController.togglePlayPause()
+        override fun onNext() = playerController.next()
+
+        override fun onToggleFavorite() {
+            val song = playerController.ui.value.current?.toSongOrNull() ?: return
+            val fav = cachedFavorites.any { FavoritesStore.mediaIdOf(it) == song.id }
+            scope.launch { favoritesStore.setFavorite(song, !fav) }
+        }
+
+        override fun onFontDelta(delta: Int) {
+            scope.launch {
+                context.dataStore.edit { prefs ->
+                    val cur = prefs[KEY_FONT_SIZE] ?: 16
+                    prefs[KEY_FONT_SIZE] = (cur + delta).coerceIn(12, 28)
+                }
+            }
+        }
+
+        override fun onLock() {
+            scope.launch { setLocked(true) }
+            Toast.makeText(
+                context,
+                "悬浮歌词已锁定，请在 设置 → 悬浮歌词 解锁",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+
+        override fun onOpenApp() {
+            val intent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+            runCatching { context.startActivity(intent) }
+        }
+
+        override fun onClose() {
+            scope.launch { context.dataStore.edit { it[KEY_ENABLED] = false } }
         }
     }
 
@@ -170,6 +226,10 @@ class OverlayLyricManager(
                     lastSchemeRef = scheme
                     currentStyle?.let { OverlayLyricWindow.restyle(it) }
                 }
+                val song = st.current?.toSongOrNull()
+                val canFavorite = song != null
+                val favorite = canFavorite &&
+                    cachedFavorites.any { FavoritesStore.mediaIdOf(it) == song.id }
                 OverlayLyricWindow.tick(
                     OverlayLyricWindow.Frame(
                         playing = st.isPlaying,
@@ -177,7 +237,9 @@ class OverlayLyricManager(
                         artist = st.current?.mediaMetadata?.artist?.toString().orEmpty(),
                         lines = cachedLines,
                         positionMs = playerController.livePositionMs(),
-                        receivedAtNs = System.nanoTime()
+                        receivedAtNs = System.nanoTime(),
+                        favorite = favorite,
+                        canFavorite = canFavorite
                     )
                 )
                 delay(100)
