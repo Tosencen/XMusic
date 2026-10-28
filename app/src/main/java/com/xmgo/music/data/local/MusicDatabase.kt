@@ -17,7 +17,9 @@ import com.xmgo.music.data.local.entity.RecentPlayEntity
         RecentPlayEntity::class
     ],
     version = 2,
-    exportSchema = false
+    // 导出 schema JSON（build.gradle.kts ksp arg room.schemaLocation）：改表结构时
+    // 有历史 schema 才能用 MigrationTestHelper 校验迁移兼容性
+    exportSchema = true
 )
 abstract class MusicDatabase : RoomDatabase() {
     abstract fun localSongDao(): LocalSongDao
@@ -25,7 +27,7 @@ abstract class MusicDatabase : RoomDatabase() {
 
     companion object {
         /** v2：移除播放清单（playlists / playlist_songs 两张表）。 */
-        private val MIGRATION_1_2 = object : Migration(1, 2) {
+        internal val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("DROP TABLE IF EXISTS playlist_songs")
                 db.execSQL("DROP TABLE IF EXISTS playlists")

@@ -18,6 +18,7 @@ android {
         targetSdk = 37
         versionCode = 4
         versionName = "1.1.2"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
@@ -74,6 +75,18 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    sourceSets {
+        // Room 导出的 schema JSON 作为 androidTest assets，MigrationTestHelper 按数据库
+        // 全限定类名目录（schemas/com.xmgo.music.data.local.MusicDatabase/2.json）读取
+        getByName("androidTest").assets.srcDir("$projectDir/schemas")
+    }
+}
+
+// Room schema 导出（配合 MusicDatabase exportSchema = true）：提交到版本库，
+// 后续改表结构时用 MigrationTestHelper 校验迁移是否与旧 schema 兼容
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {
@@ -114,6 +127,7 @@ dependencies {
     implementation(libs.androidx.security.crypto)
 
     implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.datasource.okhttp)
     implementation(libs.androidx.media3.session)
     implementation(libs.androidx.media3.common)
     implementation(libs.androidx.room.runtime)
@@ -124,4 +138,8 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 
     testImplementation(libs.junit)
+
+    androidTestImplementation(libs.androidx.room.testing)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
 }
