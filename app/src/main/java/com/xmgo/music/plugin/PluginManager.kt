@@ -106,7 +106,8 @@ class PluginManager(private val context: Context) {
     /** 安装 .qplug 文件并加载运行时（阻塞 IO，调用方自行切协程）。 */
     fun install(zipFile: File): InstalledPlugin {
         val plugin = installer.install(zipFile)
-        runtimes.remove(plugin.id)
+        // 覆盖安装：释放旧运行时（actor 线程 + 协程作用域），防止重复加载泄漏
+        runtimes.remove(plugin.id)?.dispose()
         synchronized(_plugins) {
             _plugins.removeAll { it.id == plugin.id }
             _plugins.add(plugin)
@@ -117,7 +118,7 @@ class PluginManager(private val context: Context) {
     }
 
     fun uninstall(id: String) {
-        runtimes.remove(id)?.let { Log.i(TAG, "unloaded $id") }
+        runtimes.remove(id)?.dispose()
         installer.uninstall(id)
         synchronized(_plugins) { _plugins.removeAll { it.id == id } }
         _pluginsFlow.value = plugins
@@ -322,7 +323,16 @@ class PluginManager(private val context: Context) {
             val args = JsonObject(
                 mapOf("id" to JsonPrimitive(song.rawId))
             ).toString()
-            val raw = callHandler(pluginId, "resolveStream", args)
+            // 弱网偶发失败自动重试一次（退避 400ms）；协程取消/超时不重试
+            val raw = try {
+                callHandler(pluginId, "resolveStream", args)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "resolveStream retry $pluginId:${song.rawId}: ${e.message}")
+                kotlinx.coroutines.delay(400)
+                callHandler(pluginId, "resolveStream", args)
+            }
             val info = parseStream(raw)
             streamCache.put(cacheKey, CachedStream(info, System.currentTimeMillis()))
             return info

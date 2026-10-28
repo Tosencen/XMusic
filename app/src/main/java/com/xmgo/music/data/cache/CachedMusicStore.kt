@@ -7,6 +7,7 @@ import com.xmgo.music.plugin.PluginManager
 import com.xmgo.music.plugin.model.Lyrics
 import com.xmgo.music.plugin.model.Song
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -32,6 +33,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 /** 缓存时顺带拉取歌词的限时（超时则跳过，音频缓存照常成功）。 */
@@ -95,14 +97,51 @@ class CachedMusicStore(
         .readTimeout(120, TimeUnit.SECONDS)
         .build()
 
-    private val _cached = MutableStateFlow(loadIndex())
+    // 初始为空列表，首次访问在 IO 线程懒加载（避免 Application 主线程同步读盘解析 JSON）
+    private val _cached = MutableStateFlow<List<CachedSongEntry>>(emptyList())
     val cached: StateFlow<List<CachedSongEntry>> = _cached.asStateFlow()
 
-    private val _groups = MutableStateFlow(loadGroups())
+    private val _groups = MutableStateFlow<List<CachedMusicGroup>>(emptyList())
     val groups: StateFlow<List<CachedMusicGroup>> = _groups.asStateFlow()
 
     /** UI 无关的下载作用域：不随弹层/页面销毁取消。 */
     private val storeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** 索引/分组加载完成信号：所有读写索引的挂起路径先 await，防止加载完成前的写入覆盖磁盘数据。 */
+    private val stateLoaded = CompletableDeferred<Unit>()
+
+    init {
+        storeScope.launch {
+            _cached.value = loadIndex()
+            _groups.value = loadGroups()
+            // 加载后、stateLoaded 放行前清理：此时尚无下载在写文件（下载路径先 await stateLoaded）
+            cleanupOrphanFiles()
+            stateLoaded.complete(Unit)
+        }
+    }
+
+    /**
+     * 清理孤儿文件：
+     * - `*.part`：进程被杀/崩溃残留的未完成下载（正常取消/失败路径会自行删除）；
+     * - 不在 index.json 里的音频文件：崩溃发生在 rename 成功之后、索引落盘之前时会留下
+     *   这种"完整但未入索引"的文件——index.json 是唯一事实来源，留着只会白占空间。
+     * 歌词 sidecar（`<sha1>.lyrics.json`）按其音频是否在索引里决定去留。
+     */
+    private fun cleanupOrphanFiles() {
+        val indexedNames = _cached.value.mapTo(HashSet()) { it.fileName }
+        val indexedBases = indexedNames.mapTo(HashSet()) { it.substringBefore('.') }
+        dir.listFiles()?.forEach { f ->
+            val n = f.name
+            when {
+                n.endsWith(".part") -> f.delete()
+                n == indexFile.name || n == groupsFile.name -> Unit
+                n.endsWith(".lyrics.json") -> {
+                    if (n.removeSuffix(".lyrics.json") !in indexedBases) f.delete()
+                }
+                f.isFile && n !in indexedNames -> f.delete()
+            }
+        }
+    }
 
     /** 正在下载中的 mediaId 集合（UI 展示"缓存中…"）。 */
     private val _cachingIds = MutableStateFlow<Set<String>>(emptySet())
@@ -127,7 +166,7 @@ class CachedMusicStore(
         val mediaId = mediaIdOf(song)
         if (mediaId in _cachingIds.value || isCached(mediaId)) return
         storeScope.launch {
-            _cachingIds.value = _cachingIds.value + mediaId
+            _cachingIds.update { it + mediaId }
             try {
                 val result = cache(song)
                 if (result.isSuccess) {
@@ -138,8 +177,8 @@ class CachedMusicStore(
             } catch (t: Throwable) {
                 _events.tryEmit("缓存失败「${song.name}」")
             } finally {
-                _cachingIds.value = _cachingIds.value - mediaId
-                _progress.value = _progress.value - mediaId
+                _cachingIds.update { it - mediaId }
+                _progress.update { it - mediaId }
             }
         }
     }
@@ -180,7 +219,7 @@ class CachedMusicStore(
                         false
                     }
                     if (ok) done++ else failed++
-                    _progress.value = _progress.value - mediaId
+                    _progress.update { it - mediaId }
                     _batchProgress.value = BatchProgress(
                         total = pending.size, done = done, failed = failed, mediaIds = pendingIds
                     )
@@ -193,7 +232,7 @@ class CachedMusicStore(
                 _events.tryEmit("已取消下载（已完成 $done 首）")
                 throw e
             } finally {
-                pendingIds.forEach { _progress.value = _progress.value - it }
+                pendingIds.forEach { id -> _progress.update { it - id } }
                 _batchProgress.update { cur ->
                     if (cur?.mediaIds == pendingIds) null else cur
                 }
@@ -237,11 +276,24 @@ class CachedMusicStore(
         }
     }
 
-    /** 下载缓存（幂等：已缓存直接返回）。返回文件大小，失败抛异常。 */
+    /** 同一 mediaId 的在途下载去重（全局锁拆分后防止同一首歌并发重复下载）。 */
+    private val inFlightDownloads = ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * 下载缓存（幂等：已缓存直接返回）。返回文件大小，失败抛异常。
+     * 锁粒度：网络传输不持全局锁（否则删除/改分组/新下载全被阻塞到当前歌曲下载完），
+     * 仅索引提交段持 [mutex]；同一 mediaId 用 [inFlightDownloads] 去重。
+     */
     suspend fun cache(song: Song): Result<Long> = withContext(Dispatchers.IO) {
         val mediaId = mediaIdOf(song)
-        mutex.withLock {
+        stateLoaded.await()
+        fileFor(mediaId)?.let { return@withContext Result.success(it.length()) }
+        if (!inFlightDownloads.add(mediaId)) {
+            // 同一首歌已在下载：等待其结果语义复杂，直接按"已缓存/失败"以外的幂等成功跳过
             fileFor(mediaId)?.let { return@withContext Result.success(it.length()) }
+            return@withContext Result.failure(IllegalStateException("该歌曲正在下载中"))
+        }
+        try {
             runCatching {
                 val stream = pluginManager.providerFor(song.sourceId).resolveStream(song)
                 val ext = extensionFor(stream.mimeType, stream.url)
@@ -256,8 +308,9 @@ class CachedMusicStore(
                         if (!resp.isSuccessful) error("下载失败 HTTP ${resp.code}")
                         val body = resp.body ?: error("下载失败：空响应")
                         val total = body.contentLength() // -1 = 未知
-                        _progress.value = _progress.value +
-                            (mediaId to CacheProgress(received = 0, total = total))
+                        _progress.update {
+                            it + (mediaId to CacheProgress(received = 0, total = total))
+                        }
                         tmp.outputStream().use { out ->
                             body.byteStream().use { input ->
                                 val buf = ByteArray(64 * 1024)
@@ -273,12 +326,14 @@ class CachedMusicStore(
                                     val now = System.currentTimeMillis()
                                     if (now - lastEmit >= 150) {
                                         lastEmit = now
-                                        _progress.value = _progress.value +
-                                            (mediaId to CacheProgress(received, total))
+                                        _progress.update {
+                                            it + (mediaId to CacheProgress(received, total))
+                                        }
                                     }
                                 }
-                                _progress.value = _progress.value +
-                                    (mediaId to CacheProgress(received, total.coerceAtLeast(0)))
+                                _progress.update {
+                                    it + (mediaId to CacheProgress(received, total.coerceAtLeast(0)))
+                                }
                             }
                         }
                     }
@@ -287,16 +342,19 @@ class CachedMusicStore(
                         tmp.copyTo(target, overwrite = true)
                         tmp.delete()
                     }
-                    val entry = CachedSongEntry(
-                        song = song,
-                        fileName = fileName,
-                        sizeBytes = target.length(),
-                        cachedAt = System.currentTimeMillis(),
-                        groupId = _cached.value
-                            .firstOrNull { mediaIdOf(it.song) == mediaId }?.groupId
-                    )
-                    val next = _cached.value.filterNot { mediaIdOf(it.song) == mediaId } + entry
-                    persist(next)
+                    // 索引提交段：短锁，不阻塞其他歌的网络下载
+                    mutex.withLock {
+                        val entry = CachedSongEntry(
+                            song = song,
+                            fileName = fileName,
+                            sizeBytes = target.length(),
+                            cachedAt = System.currentTimeMillis(),
+                            groupId = _cached.value
+                                .firstOrNull { mediaIdOf(it.song) == mediaId }?.groupId
+                        )
+                        val next = _cached.value.filterNot { mediaIdOf(it.song) == mediaId } + entry
+                        persist(next)
+                    }
                     // 歌词一并缓存（best-effort：拉词失败不影响音频缓存结果）
                     runCatching {
                         withTimeoutOrNull(LYRICS_FETCH_TIMEOUT_MS) {
@@ -314,10 +372,13 @@ class CachedMusicStore(
                 if (it is CancellationException) throw it
                 android.util.Log.w("CachedMusicStore", "缓存失败「${song.name}」", it)
             }
+        } finally {
+            inFlightDownloads.remove(mediaId)
         }
     }
 
     suspend fun remove(mediaId: String): Unit = withContext(Dispatchers.IO) {
+        stateLoaded.await()
         mutex.withLock {
             val entry = _cached.value.firstOrNull { mediaIdOf(it.song) == mediaId }
                 ?: return@withLock
@@ -333,6 +394,7 @@ class CachedMusicStore(
     // ---------------------------------------------------------------- 分组
 
     suspend fun createGroup(name: String): String = withContext(Dispatchers.IO) {
+        stateLoaded.await()
         mutex.withLock {
             val id = "g_${System.currentTimeMillis()}"
             val next = _groups.value + CachedMusicGroup(id = id, name = name.trim())
@@ -342,6 +404,7 @@ class CachedMusicStore(
     }
 
     suspend fun renameGroup(id: String, name: String): Unit = withContext(Dispatchers.IO) {
+        stateLoaded.await()
         mutex.withLock {
             persistGroups(_groups.value.map {
                 if (it.id == id) it.copy(name = name.trim()) else it
@@ -351,6 +414,7 @@ class CachedMusicStore(
 
     /** 删除分组：组内歌曲回到未分组（保留缓存文件）。 */
     suspend fun deleteGroup(id: String): Unit = withContext(Dispatchers.IO) {
+        stateLoaded.await()
         mutex.withLock {
             persistGroups(_groups.value.filterNot { it.id == id })
             persist(_cached.value.map {
@@ -362,6 +426,7 @@ class CachedMusicStore(
     /** 把歌曲移动到分组（groupId = null 移回未分组）。 */
     suspend fun moveToGroup(mediaIds: Collection<String>, groupId: String?): Unit =
         withContext(Dispatchers.IO) {
+            stateLoaded.await()
             mutex.withLock {
                 val ids = mediaIds.toSet()
                 persist(_cached.value.map {
@@ -373,18 +438,44 @@ class CachedMusicStore(
     // ---------------------------------------------------------------- 内部
 
     private fun loadIndex(): List<CachedSongEntry> {
-        if (!indexFile.isFile) return emptyList()
-        return runCatching {
-            json.decodeFromString<List<CachedSongEntry>>(indexFile.readText(Charsets.UTF_8))
-        }.onFailure {
-            android.util.Log.w("CachedMusicStore", "index.json 解析失败，按空列表处理", it)
-        }.getOrNull() ?: emptyList()
+        val candidates = listOf(indexFile, File(dir, "index.json.bak"))
+        for (file in candidates) {
+            if (!file.isFile) continue
+            runCatching {
+                json.decodeFromString<List<CachedSongEntry>>(file.readText(Charsets.UTF_8))
+            }.onSuccess {
+                if (file != indexFile) {
+                    // 备份恢复成功：立即回写主文件，后续正常走主文件路径
+                    writeAtomically(indexFile, json.encodeToString(it))
+                }
+                return it
+            }.onFailure {
+                android.util.Log.w("CachedMusicStore", "${file.name} 解析失败，尝试下一来源", it)
+            }
+        }
+        return emptyList()
+    }
+
+    /** 先写临时文件再 rename 覆盖，避免进程被杀/磁盘满留下截断的索引文件。 */
+    private fun writeAtomically(target: File, text: String) {
+        val tmp = File(target.parentFile, target.name + ".tmp")
+        tmp.writeText(text, Charsets.UTF_8)
+        if (!tmp.renameTo(target)) {
+            // rename 失败（个别文件系统）：退化为直接写 + 备份旧文件
+            runCatching {
+                if (target.isFile) target.copyTo(File(target.parentFile, target.name + ".bak"), overwrite = true)
+                tmp.copyTo(target, overwrite = true)
+            }
+            tmp.delete()
+        }
     }
 
     private fun persist(entries: List<CachedSongEntry>) {
         _cached.value = entries
         runCatching {
-            indexFile.writeText(json.encodeToString(entries), Charsets.UTF_8)
+            writeAtomically(indexFile, json.encodeToString(entries))
+        }.onFailure {
+            android.util.Log.w("CachedMusicStore", "index.json 写入失败", it)
         }
     }
 
@@ -398,7 +489,9 @@ class CachedMusicStore(
     private fun persistGroups(groups: List<CachedMusicGroup>) {
         _groups.value = groups
         runCatching {
-            groupsFile.writeText(json.encodeToString(groups), Charsets.UTF_8)
+            writeAtomically(groupsFile, json.encodeToString(groups))
+        }.onFailure {
+            android.util.Log.w("CachedMusicStore", "groups.json 写入失败", it)
         }
     }
 

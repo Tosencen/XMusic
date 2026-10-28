@@ -63,7 +63,9 @@ fun XmgoTheme(
         anyDarkColorScheme().primary
     }
 
-    val schemeState = remember(seedColor, style) {
+    // 只保留后台计算一条路径（旧实现 remember 里在主线程先算一遍、LaunchedEffect 又算一遍，
+    // 首帧白算一次）；初始值给一个中性默认色，isAmoled 参与 key（切纯黑时主题要重算）
+    val schemeState = remember {
         mutableStateOf(
             dynamicColorScheme(
                 seedColor = seedColor,
@@ -75,7 +77,7 @@ fun XmgoTheme(
         )
     }
 
-    LaunchedEffect(seedColor, isDark, style) {
+    LaunchedEffect(seedColor, isDark, isAmoled, style) {
         val newScheme = withContext(Dispatchers.Default) {
             dynamicColorScheme(
                 seedColor = seedColor,

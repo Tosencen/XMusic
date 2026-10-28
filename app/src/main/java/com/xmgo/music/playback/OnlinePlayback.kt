@@ -35,6 +35,8 @@ suspend fun Song.toMediaItem(
     return MediaItem.Builder()
         .setMediaId(mediaId)
         .setUri(uri)
+        // 流地址会过期换签名：用 mediaId 作缓存键，磁盘缓存才能跨地址命中（本地文件不缓存）
+        .apply { if (uri.startsWith("http")) setCustomCacheKey(mediaId) }
         .setMediaMetadata(
             MediaMetadata.Builder()
                 .setTitle(name)

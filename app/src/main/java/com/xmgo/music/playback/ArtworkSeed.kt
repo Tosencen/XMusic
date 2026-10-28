@@ -15,7 +15,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
-import java.net.HttpURLConnection
 
 /**
  * 随播放封面取色（qplayer monet 那套）：封面字节 → 主导色 seed → Theme 动态配色。
@@ -40,7 +39,7 @@ object ArtworkSeed {
         scope.launch {
             val target = if (scheme == "http" || scheme == "https") thumbUrlIfNetease(uri.toString()) else uri.toString()
             val bytes = when {
-                scheme == "http" || scheme == "https" -> fetchBytes(target)
+                scheme == "http" || scheme == "https" -> fetchBytes(context, target)
                 scheme == "file" -> runCatching { File(uri.path ?: return@launch).readBytes() }.getOrNull()
                 else -> runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
             }
@@ -67,12 +66,24 @@ object ArtworkSeed {
         return url + (if (url.contains("?")) "&" else "?") + "param=128y128"
     }
 
-    private fun fetchBytes(url: String): ByteArray? = runCatching {
-        val conn = java.net.URL(url).openConnection() as HttpURLConnection
-        conn.connectTimeout = 3000
-        conn.readTimeout = 3000
-        conn.requestMethod = "GET"
-        conn.inputStream.use { it.readBytes() }
+    @Volatile private var client: okhttp3.OkHttpClient? = null
+
+    /** 共享 OkHttp（HTTP/2 + 连接复用 + 10MB 磁盘缓存），重复封面不再联网。 */
+    private fun clientOf(context: Context): okhttp3.OkHttpClient =
+        client ?: synchronized(this) {
+            client ?: okhttp3.OkHttpClient.Builder()
+                .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+                .cache(okhttp3.Cache(File(context.applicationContext.cacheDir, "artwork_http"), 10L * 1024 * 1024))
+                .build()
+                .also { client = it }
+        }
+
+    private fun fetchBytes(context: Context, url: String): ByteArray? = runCatching {
+        val req = okhttp3.Request.Builder().url(url).build()
+        clientOf(context).newCall(req).execute().use { resp ->
+            if (resp.isSuccessful) resp.body.bytes() else null
+        }
     }.getOrNull()
 
     /**

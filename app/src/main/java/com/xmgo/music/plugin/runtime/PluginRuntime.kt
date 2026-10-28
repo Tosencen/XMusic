@@ -11,6 +11,7 @@ import com.xmgo.music.plugin.model.PluginManifest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import org.mozilla.javascript.Context
 import org.mozilla.javascript.Function
@@ -94,7 +95,8 @@ class PluginRuntime(
     private data class BridgeValue(val isJson: Boolean, val value: String?)
 
     private val manifest: PluginManifest = plugin.manifest
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // 承载阻塞的 HTTP/crypto 桥调用与微任务续接，必须用 IO（Default 池会被阻塞任务占死）
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val contexts = org.mozilla.javascript.ContextFactory()
     private var scopeObject: Scriptable? = null
     private var exportsObject: Scriptable? = null
@@ -142,7 +144,30 @@ class PluginRuntime(
     @Volatile
     private var loaded = false
 
+    @Volatile
+    private var disposed = false
+
     val id: String get() = manifest.id
+
+    /**
+     * 释放运行时（卸载/覆盖安装插件时调用）：取消协程作用域、关闭单线程 actor、
+     * 清空 Rhino 全局对象引用。已释放后再 invokeHandler 直接失败，不再排队任务。
+     */
+    fun dispose() {
+        if (disposed) return
+        disposed = true
+        try {
+            scope.cancel()
+        } catch (_: Throwable) {
+        }
+        actor.shutdown()
+        synchronized(lock) {
+            scopeObject = null
+            exportsObject = null
+            loaded = false
+        }
+        Log.i(TAG, "runtime ${manifest.id} disposed")
+    }
 
     /** 确保插件已加载（幂等）。失败抛异常。 */
     fun ensureLoaded() {
@@ -192,6 +217,11 @@ class PluginRuntime(
 
     /** 调用插件 handler（如 searchSongs），返回其 Promise  resolve 的值（JSON 字符串）。 */
     fun invokeHandler(name: String, argsJson: String): CompletableFuture<String> {
+        if (disposed) {
+            return CompletableFuture.failedFuture(
+                IllegalStateException("plugin ${manifest.id} runtime disposed")
+            )
+        }
         val future = CompletableFuture<String>()
         val token = InvokeToken()
         // 协程取消 future 时同步标记 token 并 cancel 在途 OkHttp，令在途回调与后续 actor 任务跳过

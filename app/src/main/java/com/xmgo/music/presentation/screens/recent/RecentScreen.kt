@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
@@ -41,6 +42,8 @@ import com.xmgo.music.playback.PlayerController
 import com.xmgo.music.playback.playEntriesStaged
 import com.xmgo.music.plugin.PluginManager
 import com.xmgo.music.plugin.model.Song
+import com.xmgo.music.presentation.shared_components.EmptyState
+import com.xmgo.music.presentation.shared_components.MiniPlayerBottomReserve
 import com.xmgo.music.presentation.shared_components.SongActionsMenu
 import com.xmgo.music.presentation.shared_components.SongRow
 import kotlinx.coroutines.launch
@@ -140,31 +143,17 @@ fun RecentScreen(onNavigateUp: () -> Unit) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
             if (entries.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.PlaylistPlay,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
-                        Text(
-                            text = "还没有播放记录",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
+                EmptyState(
+                    icon = Icons.AutoMirrored.Rounded.PlaylistPlay,
+                    title = "还没有播放记录",
+                    iconSize = 24.dp
+                )
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 108.dp)
+                    contentPadding = PaddingValues(bottom = MiniPlayerBottomReserve)
                 ) {
-                    items(entries, key = { it.mediaId }) { item ->
+                    itemsIndexed(entries, key = { _, it -> it.mediaId }) { index, item ->
                         val onlineSong = (item.entry as? PlayableEntry.Online)?.song
                         val row: @Composable () -> Unit = {
                             SongRow(
@@ -176,7 +165,6 @@ fun RecentScreen(onNavigateUp: () -> Unit) {
                                 isPlaying = playerState.isPlaying &&
                                     playerState.current?.mediaId == item.mediaId,
                                 onClick = {
-                                    val index = entries.indexOfFirst { it.mediaId == item.mediaId }
                                     scope.launch {
                                         resolving = true
                                         runCatching {

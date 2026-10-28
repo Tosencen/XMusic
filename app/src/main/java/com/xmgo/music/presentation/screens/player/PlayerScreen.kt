@@ -93,6 +93,7 @@ import com.xmgo.music.lyrics.LyricLine
 import com.xmgo.music.lyrics.LyricsRepository
 import com.xmgo.music.playback.PlayerController
 import com.xmgo.music.presentation.shared_components.FluidBackground
+import com.xmgo.music.presentation.shared_components.stableKeys
 import com.xmgo.music.utils.XmgoTheme
 import kotlinx.coroutines.launch
 import org.koin.compose.getKoin
@@ -129,8 +130,9 @@ fun PlayerScreen(onNavigateUp: () -> Unit) {
     val theme by rememberAppTheme()
     val appDark = remember(theme, systemDark) { XmgoTheme.isDark(theme, systemDark) }
 
-    // 本页始终是深色画面：强制浅色状态栏/导航栏图标，退出时恢复主题设置
-    DisposableEffect(Unit) {
+    // 本页始终是深色画面：强制浅色状态栏/导航栏图标，退出时恢复主题设置。
+    // key 用 appDark：主题在本页停留期间变化时 effect 重启，onDispose 读到的是最新值
+    DisposableEffect(appDark) {
         val controller = context.findActivity()?.window?.let { WindowInsetsControllerCompat(it, view) }
         controller?.isAppearanceLightStatusBars = false
         controller?.isAppearanceLightNavigationBars = false
@@ -157,17 +159,13 @@ fun PlayerScreen(onNavigateUp: () -> Unit) {
         lyricsLoading = false
     }
 
-    val lyricIndex = remember(lyrics, state.positionMs) {
-        LrcParser.currentIndex(lyrics, state.positionMs)
-    }
+    // 歌词索引在 LyricsPane 内部收集 positionMs 计算（见下方子组合），
+    // 进度条同理抽为 PlayerProgressBar——两者各自收集高频进度流，
+    // 播放页主体（封面/歌名/菜单/播控）不再随 500ms 进度重组
 
     var showLyrics by remember { mutableStateOf(false) }
     var showQueue by remember { mutableStateOf(false) }
     // var showPlaybackSettings by remember { mutableStateOf(false) } // 倍速/睡眠定时暂时下线
-
-    var scrubbing by remember { mutableStateOf(false) }
-    var scrubPosition by remember { mutableFloatStateOf(0f) }
-    val displayPosition = if (scrubbing) scrubPosition.toLong() else state.positionMs
 
     BackHandler(onBack = {
         when {
@@ -261,14 +259,12 @@ fun PlayerScreen(onNavigateUp: () -> Unit) {
                     Box(modifier = Modifier.fillMaxSize()) {
                         // 歌词模式：整屏歌词（顶部不显示歌名）。
                         // 左下角封面切换/右下角收起按钮在 AnimatedContent 外常驻，见下方
-                        LyricsView(
-                            lines = lyrics,
-                            currentIndex = when {
-                                lyricsLoading -> -2
-                                else -> lyricIndex
-                            },
+                        LyricsPane(
+                            lyrics = lyrics,
+                            loading = lyricsLoading,
                             halfViewport = boxMaxHeight / 2,
                             onSeek = { position -> playerController.seekTo(position) },
+                            playerController = playerController,
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -309,60 +305,11 @@ fun PlayerScreen(onNavigateUp: () -> Unit) {
             }
         }
 
-        // 进度条：波浪样式 + 透明 Slider 保留拖动
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
-            Box(contentAlignment = Alignment.Center) {
-                LinearWavyProgressIndicator(
-                    progress = {
-                        if (state.durationMs > 0) {
-                            displayPosition.toFloat() / state.durationMs.toFloat()
-                        } else {
-                            0f
-                        }
-                    },
-                    color = Color.White,
-                    trackColor = Color.White.copy(alpha = 0.3f),
-                    amplitude = { 0.22f },
-                    wavelength = 36.dp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(28.dp)
-                )
-                Slider(
-                    value = displayPosition.toFloat(),
-                    onValueChange = { value ->
-                        scrubbing = true
-                        scrubPosition = value
-                    },
-                    onValueChangeFinished = {
-                        playerController.seekTo(scrubPosition.toLong())
-                        scrubbing = false
-                    },
-                    valueRange = 0f..(state.durationMs.coerceAtLeast(1)).toFloat(),
-                    enabled = state.durationMs > 0,
-                    colors = SliderDefaults.colors(
-                        activeTrackColor = Color.Transparent,
-                        inactiveTrackColor = Color.Transparent
-                    ),
-                    thumb = { }
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = formatTime(displayPosition),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Color.White.copy(alpha = 0.7f)
-                )
-                Text(
-                    text = formatTime(state.durationMs),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Color.White.copy(alpha = 0.7f)
-                )
-            }
-        }
+        // 进度条：波浪样式 + 透明 Slider 保留拖动（子组合内收集高频进度流）
+        PlayerProgressBar(
+            durationMs = state.durationMs,
+            playerController = playerController
+        )
 
         // 播控
         Row(
@@ -589,8 +536,11 @@ private fun QueueSheet(
                     )
                 }
             }
+            // 队列 key 预计算：混 index 会让随机播放/增删时整列 key 全变（全量重绑）；
+            // 去重计数既保证同一首歌重复入队时 key 唯一，又让未变动项保留组合状态
+            val queueKeys = remember(queue) { stableKeys(queue) { it.mediaId } }
             LazyColumn(modifier = Modifier.weight(1f)) {
-                itemsIndexed(queue, key = { index, item -> "$index-${item.mediaId}" }) { index, item ->
+                itemsIndexed(queue, key = { index, _ -> queueKeys[index] }) { index, item ->
                     val isCurrent = item.mediaId == currentMediaId
                     Row(
                         modifier = Modifier
@@ -650,6 +600,102 @@ private fun formatTime(ms: Long): String {
     val m = (total % 3600) / 60
     val s = total % 60
     return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
+}
+
+/**
+ * 播放进度条（波浪 + 透明 Slider 拖动）。
+ * 独立收集高频 [PlayerController.positionMs] 流：进度每 500ms 变化时
+ * 只有本组合重组，播放页主体（封面/歌名/播控）不再整体重组。
+ */
+@Composable
+private fun PlayerProgressBar(
+    durationMs: Long,
+    playerController: PlayerController
+) {
+    val positionMs by playerController.positionMs.collectAsState()
+    var scrubbing by remember { mutableStateOf(false) }
+    var scrubPosition by remember { mutableFloatStateOf(0f) }
+    val displayPosition = if (scrubbing) scrubPosition.toLong() else positionMs
+
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+        Box(contentAlignment = Alignment.Center) {
+            LinearWavyProgressIndicator(
+                progress = {
+                    if (durationMs > 0) {
+                        displayPosition.toFloat() / durationMs.toFloat()
+                    } else {
+                        0f
+                    }
+                },
+                color = Color.White,
+                trackColor = Color.White.copy(alpha = 0.3f),
+                amplitude = { 0.22f },
+                wavelength = 36.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(28.dp)
+            )
+            Slider(
+                value = displayPosition.toFloat(),
+                onValueChange = { value ->
+                    scrubbing = true
+                    scrubPosition = value
+                },
+                onValueChangeFinished = {
+                    playerController.seekTo(scrubPosition.toLong())
+                    scrubbing = false
+                },
+                valueRange = 0f..(durationMs.coerceAtLeast(1)).toFloat(),
+                enabled = durationMs > 0,
+                colors = SliderDefaults.colors(
+                    activeTrackColor = Color.Transparent,
+                    inactiveTrackColor = Color.Transparent
+                ),
+                thumb = { }
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = formatTime(displayPosition),
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White.copy(alpha = 0.7f)
+            )
+            Text(
+                text = formatTime(durationMs),
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White.copy(alpha = 0.7f)
+            )
+        }
+    }
+}
+
+/**
+ * 歌词面板：内部收集高频进度流计算当前行索引，
+ * 歌词行随播放推进高亮/滚动时仅本组合重组。
+ */
+@Composable
+private fun LyricsPane(
+    lyrics: List<LyricLine>,
+    loading: Boolean,
+    halfViewport: androidx.compose.ui.unit.Dp,
+    onSeek: (Long) -> Unit,
+    playerController: PlayerController,
+    modifier: Modifier = Modifier
+) {
+    val positionMs by playerController.positionMs.collectAsState()
+    val lyricIndex = remember(lyrics, positionMs) {
+        LrcParser.currentIndex(lyrics, positionMs)
+    }
+    LyricsView(
+        lines = lyrics,
+        currentIndex = if (loading) -2 else lyricIndex,
+        halfViewport = halfViewport,
+        onSeek = onSeek,
+        modifier = modifier
+    )
 }
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {

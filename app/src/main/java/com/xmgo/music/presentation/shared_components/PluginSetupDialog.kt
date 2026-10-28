@@ -36,6 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,7 +73,9 @@ fun PluginSetupDialog(
     var catalog by remember { mutableStateOf<List<CatalogRelease>?>(null) }
     var catalogLoading by remember { mutableStateOf(false) }
     var catalogError by remember { mutableStateOf<String?>(null) }
-    var installedVer by remember { mutableStateOf(pluginManager.plugins) }
+    // 响应式：安装/卸载由 PluginManager.pluginsFlow 统一推送，不再快照+手动刷新
+    // （此前从其他入口改插件时这里会显示过期的已装状态）
+    val installedVer by pluginManager.pluginsFlow.collectAsState()
     var busy by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf(setOf<String>()) }
     var installingIds by remember { mutableStateOf(setOf<String>()) }
@@ -103,7 +106,6 @@ fun PluginSetupDialog(
             installingIds = installingIds + rel.source.id
             pluginManager.installFromRelease(rel) { result ->
                 installingIds = installingIds - rel.source.id
-                installedVer = pluginManager.plugins
                 result.onSuccess { plugin ->
                     if (primarySource.isBlank()) primarySource = plugin.id
                 }
@@ -122,7 +124,6 @@ fun PluginSetupDialog(
             busy = false
             result.fold(
                 onSuccess = { plugin ->
-                    installedVer = pluginManager.plugins
                     primarySource = plugin.id
                     onDone()
                 },

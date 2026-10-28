@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -50,6 +51,12 @@ import coil3.compose.AsyncImage
 import com.xmgo.music.playback.PlayerController
 
 /**
+ * 列表底部为悬浮 MiniPlayer 预留的空间（contentPadding / 空态居中用）。
+ * 此前 9 处硬编码 `108.dp` 散落各屏，与 MiniPlayer 实际高度同源维护于此。
+ */
+val MiniPlayerBottomReserve = 108.dp
+
+/**
  * 悬浮胶囊迷你播放模块（仅首页与音乐列表页显示）：
  * 圆角悬浮 + 阴影，整个模块横向即播放进度（已播部分着色 + 底部进度线）。
  * 点击开全屏播放页。
@@ -82,8 +89,10 @@ fun MiniPlayer(
                     .fillMaxWidth()
                     .clip(shape)
                     .drawBehind {
+                        // 进度在绘制阶段读状态：进度变化仅重绘进度线，不触发 MiniPlayer 重组
+                        val pos = playerController.positionMs.value
                         val fraction = if (state.durationMs > 0) {
-                            (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f)
+                            (pos.toFloat() / state.durationMs).coerceIn(0f, 1f)
                         } else 0f
                         if (fraction > 0f) {
                             drawRect(

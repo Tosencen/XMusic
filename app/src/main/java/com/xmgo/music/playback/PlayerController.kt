@@ -65,6 +65,14 @@ class PlayerController(
     private val _ui = MutableStateFlow(UiState())
     val ui: StateFlow<UiState> = _ui.asStateFlow()
 
+    /**
+     * 高频播放进度（独立于 [ui]）：播放中每 500ms 变化。
+     * 从 [UiState] 拆出后，进度条/时间文本单独收集它，主 [ui] 只在
+     * 播放/暂停/切歌等真实状态变化时更新，避免整页（队列、图标、菜单）每 500ms 重组。
+     */
+    private val _positionMs = MutableStateFlow(0L)
+    val positionMs: StateFlow<Long> = _positionMs.asStateFlow()
+
     /** 睡眠定时剩余毫秒（0 = 未启用）。 */
     private val _sleepRemainingMs = MutableStateFlow(0L)
     val sleepRemainingMs: StateFlow<Long> = _sleepRemainingMs.asStateFlow()
@@ -219,6 +227,7 @@ class PlayerController(
         pollJob?.cancel()
         restored = false
         _ui.value = UiState()
+        _positionMs.value = 0
     }
 
     /** 播放整列（本地歌或已取流的在线歌）。 */
@@ -580,12 +589,14 @@ class PlayerController(
 
     private fun syncFromPlayer() {
         val c = controller ?: return
+        val pos = c.currentPosition.coerceAtLeast(0)
+        _positionMs.value = pos
         _ui.value = UiState(
             connected = true,
             queue = c.queueSnapshot(),
             current = c.currentMediaItem,
             isPlaying = c.isPlaying,
-            positionMs = c.currentPosition.coerceAtLeast(0),
+            positionMs = pos,
             durationMs = c.duration.takeIf { it > 0 }
                 ?: c.currentMediaItem?.mediaMetadata?.durationMs?.takeIf { it > 0 } ?: 0,
             shuffleEnabled = c.shuffleModeEnabled,
@@ -598,11 +609,25 @@ class PlayerController(
         pollJob?.cancel()
         pollJob = scope.launch {
             var tick = 0
+            // 上次已知的真实状态：仅在播放/暂停/切歌/buffering 变化时才全量 sync，
+            // 进度走独立 _positionMs 流，避免每 500ms 一次全量 copy 导致整页重组
+            var lastPlaying = false
+            var lastBuffering = false
+            var lastMediaId: String? = null
             while (isActive) {
                 delay(500)
                 val c = controller ?: break
-                if (c.isPlaying || c.playbackState == Player.STATE_BUFFERING) {
+                _positionMs.value = c.currentPosition.coerceAtLeast(0)
+                val playing = c.isPlaying
+                val buffering = c.playbackState == Player.STATE_BUFFERING
+                val mediaId = c.currentMediaItem?.mediaId
+                if (playing != lastPlaying || buffering != lastBuffering || mediaId != lastMediaId) {
+                    lastPlaying = playing
+                    lastBuffering = buffering
+                    lastMediaId = mediaId
                     syncFromPlayer()
+                }
+                if (playing || buffering) {
                     if (++tick % 6 == 0) persist() // 播放中每 3 秒落一次进度
                 }
             }

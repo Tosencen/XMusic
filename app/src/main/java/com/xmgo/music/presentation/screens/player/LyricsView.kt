@@ -18,12 +18,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.BlurredEdgeTreatment
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -96,9 +96,21 @@ fun LyricsView(
     }
 
     Box(modifier = modifier) {
-        val layoutInfo = listState.layoutInfo
-        val viewportCenterPx = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2f
-        val halfViewportPx = (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset) / 2f
+        // 预计算两级模糊 RenderEffect（量化半径档位，避免滚动时每帧新建模糊对象）。
+        // graphicsLayer 的 renderEffect 在绘制阶段应用：滚动仅重绘，不触发整列重组。
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val blurEffects = remember(density) {
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                listOf(3f, 6f).map { dpValue ->
+                    val px = with(density) { dpValue.dp.toPx() }
+                    android.graphics.RenderEffect
+                        .createBlurEffect(px, px, android.graphics.Shader.TileMode.CLAMP)
+                        .asComposeRenderEffect()
+                }
+            } else {
+                null
+            }
+        }
 
         LazyColumn(
             state = listState,
@@ -106,30 +118,36 @@ fun LyricsView(
             contentPadding = PaddingValues(vertical = halfViewport),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            itemsIndexed(lines, key = { i, line -> "${line.timeMs}_$i" }) { index, line ->
+            itemsIndexed(lines, key = { _, line -> "${line.timeMs}_${line.text}" }) { index, line ->
                 val isCurrent = index == currentIndex
-                val itemInfo = layoutInfo.visibleItemsInfo.find { it.index == index }
-                val lineCenter = itemInfo?.let { it.offset + it.size / 2f } ?: viewportCenterPx
-                val distFraction = if (halfViewportPx > 0f) {
-                    (abs(lineCenter - viewportCenterPx) / halfViewportPx).coerceIn(0f, 1f)
-                } else {
-                    0f
-                }
-                val blurRadius = (distFraction * 6f).dp
-                val lineAlpha = if (isCurrent) 1f else (1f - distFraction * 0.55f)
-
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .then(
-                            if (blurRadius > 0.01.dp) {
-                                Modifier.blur(blurRadius, BlurredEdgeTreatment.Rectangle)
+                        .graphicsLayer {
+                            // 绘制阶段读滚动布局（layoutInfo 每帧变化，组合期读取会导致
+                            // 所有可见行每帧全部重组）：仅重绘，不重组
+                            val info = listState.layoutInfo
+                            val viewportCenter =
+                                (info.viewportStartOffset + info.viewportEndOffset) / 2f
+                            val half =
+                                (info.viewportEndOffset - info.viewportStartOffset) / 2f
+                            val item = info.visibleItemsInfo.firstOrNull { it.index == index }
+                            val lineCenter =
+                                item?.let { it.offset + it.size / 2f } ?: viewportCenter
+                            val dist = if (half > 0f) {
+                                (abs(lineCenter - viewportCenter) / half).coerceIn(0f, 1f)
                             } else {
-                                Modifier
+                                0f
                             }
-                        )
-                        .graphicsLayer { alpha = lineAlpha }
+                            alpha = if (isCurrent) 1f else (1f - dist * 0.55f)
+                            // 距中心较远才模糊，两档量化：近处完全不走模糊管线
+                            renderEffect = when {
+                                dist < 0.3f -> null
+                                dist < 0.65f -> blurEffects?.getOrNull(0)
+                                else -> blurEffects?.getOrNull(1)
+                            }
+                        }
                         .clickable { onSeek(line.timeMs) }
                         .padding(horizontal = 32.dp, vertical = 10.dp)
                 ) {

@@ -25,20 +25,20 @@ class RecentStore(private val dataStore: DataStore<Preferences>) {
 
     private val key = stringPreferencesKey("recent_online_json")
     private val json = Json { ignoreUnknownKeys = true }
+    private val listSerializer =
+        kotlinx.serialization.builtins.ListSerializer(RecentOnlineEntry.serializer())
 
     val recents: Flow<List<RecentOnlineEntry>> = dataStore.data.map { prefs ->
-        prefs[key]?.let { raw ->
-            runCatching { json.decodeFromString<List<RecentOnlineEntry>>(raw) }.getOrNull()
-        } ?: emptyList()
+        decodeListOrNull(json, prefs[key], listSerializer) ?: emptyList()
     }
 
     suspend fun record(song: Song) {
         val mediaId = FavoritesStore.mediaIdOf(song)
         dataStore.edit { prefs ->
-            val current = prefs[key]?.let { raw ->
-                runCatching { json.decodeFromString<List<RecentOnlineEntry>>(raw) }.getOrNull()
-            } ?: emptyList()
+            val current = decodeListOrNull(json, prefs[key], listSerializer)
+                ?: return@edit // 原值损坏：不覆盖，避免最近播放被空列表清掉
             prefs[key] = json.encodeToString(
+                listSerializer,
                 (listOf(RecentOnlineEntry(song)) +
                     current.filterNot { FavoritesStore.mediaIdOf(it.song) == mediaId }
                     ).take(MAX)

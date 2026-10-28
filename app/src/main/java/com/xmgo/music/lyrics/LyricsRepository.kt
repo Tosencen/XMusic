@@ -193,11 +193,15 @@ class LyricsRepository(
             normArtist.contains(normCandArtists)
     }
 
-    /** 去括号备注（(Live)/【伴奏】等）+ 转小写 + 去标点空白，用于跨源歌名匹配。 */
+    /** 去括号备注（(Live)/【伴奏】等）+ 转小写 + 去标点空白，用于跨源歌名匹配。
+     *  正则提为常量：本方法在跨源兜底时对每个候选歌手高频调用，逐次编译开销显著。 */
+    private val bracketRegex = Regex("""[\[【(（][^\]】)）]*[\]】)）]""")
+    private val nonWordRegex = Regex("""[^\p{L}\p{N}]+""")
+
     private fun normalizeForMatch(s: String): String = s
-        .replace(Regex("""[\[【(（][^\]】)）]*[\]】)）]"""), " ")
+        .replace(bracketRegex, " ")
         .lowercase()
-        .replace(Regex("""[^\p{L}\p{N}]+"""), "")
+        .replace(nonWordRegex, "")
         .trim()
 
     private fun parseLyrics(lyrics: Lyrics?): List<LyricLine>? {

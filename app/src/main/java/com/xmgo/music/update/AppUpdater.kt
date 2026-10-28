@@ -113,26 +113,30 @@ class AppUpdater(private val context: Context) {
     }
 
     /**
-     * 下载 APK：同名已存在（>1KB 视为完整）直接复用；否则四镜像逐个回退。
+     * 下载 APK：同名已存在且字节数与 release 资产一致才复用；否则四镜像逐个回退。
+     * 下载完成校验字节数（防截断/镜像返回错误页），不符则删除换下一镜像。
      * onProgress(received, total)，total 可为 -1（未知）。失败抛异常。
      */
     suspend fun download(info: UpdateInfo, onProgress: (Long, Long) -> Unit): File =
         withContext(Dispatchers.IO) {
             val dir = File(context.cacheDir, "update").apply { mkdirs() }
             val target = File(dir, "XMusic-${info.version}.apk")
-            if (target.isFile && target.length() > 1024) {
+            // 完整性判断：有资产大小时必须严格相等；无大小（0）才退化为 >1KB
+            if (target.isFile && target.length() > 1024 &&
+                (info.sizeBytes <= 0 || target.length() == info.sizeBytes)
+            ) {
                 onProgress(target.length(), target.length())
                 return@withContext target
             }
             val candidates = ASSET_MIRRORS.map { it + info.apkUrl } + info.apkUrl
             var lastError: Exception? = null
             for (url in candidates) {
+                val tmp = File(dir, "XMusic-${info.version}.apk.part")
                 try {
                     httpClient.newCall(Request.Builder().url(url).build()).execute().use { resp ->
                         if (!resp.isSuccessful) error("HTTP ${resp.code}")
                         val body = resp.body ?: error("空响应")
                         val total = body.contentLength().let { if (it > 0) it else info.sizeBytes }
-                        val tmp = File(dir, "XMusic-${info.version}.apk.part")
                         tmp.outputStream().use { out ->
                             body.byteStream().use { input ->
                                 val buf = ByteArray(64 * 1024)
@@ -150,6 +154,10 @@ class AppUpdater(private val context: Context) {
                                     }
                                 }
                                 onProgress(received, total.coerceAtLeast(0))
+                                // 字节数校验：防截断下载/镜像 200 + 错误页被当 APK 缓存安装
+                                if (total > 0 && received != total) {
+                                    error("下载不完整：$received/$total 字节")
+                                }
                             }
                         }
                         if (!tmp.renameTo(target)) {
@@ -161,14 +169,24 @@ class AppUpdater(private val context: Context) {
                     return@withContext target
                 } catch (e: Exception) {
                     lastError = e
+                    tmp.delete()
                     Log.w(TAG, "镜像下载失败（$url）：${e.message}")
                 }
             }
             throw lastError ?: IllegalStateException("下载失败")
         }
 
-    /** 调起系统安装页（cache-path 已覆盖整个 cacheDir，无需改 file_paths）。 */
+    /** 调起系统安装页（cache-path 已覆盖整个 cacheDir，无需改 file_paths）。未授权时先引导授权。 */
     fun install(file: File) {
+        // 未授予"安装未知应用"权限时先跳转授权页，避免直接 startActivity 落到设置页后还要返回重进
+        if (!context.packageManager.canRequestPackageInstalls()) {
+            val settings = Intent(
+                android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                android.net.Uri.parse("package:${context.packageName}")
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(settings)
+            return
+        }
         val uri = FileProvider.getUriForFile(
             context, "${context.packageName}.fileprovider", file
         )

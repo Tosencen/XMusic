@@ -37,6 +37,7 @@ val appModule = module {
         com.xmgo.music.overlay.OverlayLyricManager(
             androidContext(),
             get(),
+            get(),
             get()
         )
     }

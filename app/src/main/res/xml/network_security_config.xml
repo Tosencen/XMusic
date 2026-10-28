@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  网络明文策略：保持允许 cleartext（插件音源可能提供 http 的歌曲流/封面地址），
+  但用显式配置集中管理——后续若确认插件均为 https，可在此收拢为按域名放开。
+  配置见 AndroidManifest 的 android:networkSecurityConfig。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

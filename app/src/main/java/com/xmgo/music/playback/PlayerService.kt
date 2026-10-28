@@ -5,7 +5,19 @@ import android.content.Intent
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.datasource.cache.SimpleCache
+import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.database.StandaloneDatabaseProvider
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import okhttp3.OkHttpClient
+import java.io.File
+import java.util.concurrent.TimeUnit
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -16,7 +28,24 @@ import com.xmgo.music.presentation.MainActivity
  * 后台播放服务：MediaSessionService 自动接管通知栏、锁屏、蓝牙控制。
  * 音频焦点、拔耳机暂停、播放中断均由 ExoPlayer 配置处理。
  */
+@UnstableApi
 class PlayerService : MediaSessionService() {
+
+    companion object {
+        private const val CACHE_MAX_BYTES = 300L * 1024 * 1024
+
+        // 进程内单例：SimpleCache 同一目录只能有一个实例
+        @Volatile private var cache: SimpleCache? = null
+
+        private fun cacheOf(service: PlayerService): SimpleCache =
+            cache ?: synchronized(this) {
+                cache ?: SimpleCache(
+                    File(service.cacheDir, "exo_audio"),
+                    LeastRecentlyUsedCacheEvictor(CACHE_MAX_BYTES),
+                    StandaloneDatabaseProvider(service)
+                ).also { cache = it }
+            }
+    }
 
     private var mediaSession: MediaSession? = null
 
@@ -28,7 +57,25 @@ class PlayerService : MediaSessionService() {
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
 
+        // 边播边存：OkHttp 上游（HTTP/2 + 连接复用）+ 磁盘 LRU 缓存，重复播放/拖动进度不再重下
+        val okHttp = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .build()
+        val upstream = DefaultDataSource.Factory(this, OkHttpDataSource.Factory(okHttp))
+        val cacheFactory = CacheDataSource.Factory()
+            .setCache(cacheOf(this))
+            .setUpstreamDataSourceFactory(upstream)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
+        // 音乐场景：更快起播，更远缓冲，弱网少卡顿
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(20_000, 60_000, 1_500, 3_000)
+            .build()
+
         val player = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(cacheFactory))
+            .setLoadControl(loadControl)
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_LOCAL)

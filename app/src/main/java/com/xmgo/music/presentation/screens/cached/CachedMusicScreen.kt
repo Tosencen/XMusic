@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
@@ -70,9 +71,11 @@ import com.xmgo.music.data.cache.CachedMusicStore
 import com.xmgo.music.data.cache.CachedSongEntry
 import com.xmgo.music.data.datastore.FavoritesStore
 import com.xmgo.music.playback.PlayerController
-import com.xmgo.music.playback.playSongsStaged
 import com.xmgo.music.plugin.PluginManager
+import com.xmgo.music.presentation.shared_components.EmptyState
+import com.xmgo.music.presentation.shared_components.MiniPlayerBottomReserve
 import com.xmgo.music.presentation.shared_components.SongRow
+import com.xmgo.music.presentation.shared_components.rememberStagedPlayer
 import kotlinx.coroutines.launch
 import org.koin.compose.getKoin
 import kotlin.math.roundToInt
@@ -104,8 +107,9 @@ fun CachedMusicScreen(onNavigateUp: () -> Unit) {
     var filter by remember { mutableStateOf<GroupFilter>(GroupFilter.All) }
     // 多选模式：null = 未进入；非空 = 选中的 mediaId 集合
     var selection by remember { mutableStateOf<Set<String>?>(null) }
-    var resolving by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val staged = rememberStagedPlayer(
+        pluginManager, playerController, cachedMusicStore, errorMessage = "播放失败"
+    )
     // 长按自建分组 chip 弹出的操作菜单
     var chipMenuGroupId by remember { mutableStateOf<String?>(null) }
 
@@ -134,22 +138,7 @@ fun CachedMusicScreen(onNavigateUp: () -> Unit) {
 
     fun playAt(index: Int) {
         if (displaySongs.isEmpty()) return
-        scope.launch {
-            resolving = true
-            val ok = playSongsStaged(
-                songs = displaySongs,
-                index = index,
-                pluginManager = pluginManager,
-                playerController = playerController,
-                cache = cachedMusicStore
-            ) {
-                resolving = false
-            }
-            if (!ok) {
-                resolving = false
-                error = "播放失败"
-            }
-        }
+        staged.playAt(displaySongs, index)
     }
 
     Scaffold(
@@ -264,46 +253,20 @@ fun CachedMusicScreen(onNavigateUp: () -> Unit) {
                 )
             }
             if (displayEntries.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(bottom = 108.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Rounded.Download,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .padding(bottom = 12.dp)
-                                .size(40.dp)
-                        )
-                        Text(
-                            text = "还没有缓存歌曲",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "音乐列表长按歌曲选择「缓存该音乐」",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                    }
-                }
+                EmptyState(
+                    icon = Icons.Rounded.Download,
+                    title = "还没有缓存歌曲",
+                    hint = "音乐列表长按歌曲选择「缓存该音乐」",
+                    modifier = Modifier.padding(bottom = MiniPlayerBottomReserve)
+                )
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 108.dp)
+                    contentPadding = PaddingValues(bottom = MiniPlayerBottomReserve)
                 ) {
-                    items(displayEntries, key = { FavoritesStore.mediaIdOf(it.song) }) { entry ->
+                    itemsIndexed(displayEntries, key = { _, it -> FavoritesStore.mediaIdOf(it.song) }) { index, entry ->
                         val song = entry.song
                         val mediaId = FavoritesStore.mediaIdOf(song)
-                        val index = displaySongs.indexOfFirst {
-                            FavoritesStore.mediaIdOf(it) == mediaId
-                        }
                         val cachePct = progress[mediaId]
 
                         val row: @Composable () -> Unit = {
@@ -365,7 +328,7 @@ fun CachedMusicScreen(onNavigateUp: () -> Unit) {
                 }
             }
 
-            error?.let { message ->
+            staged.error?.let { message ->
                 Text(
                     text = message,
                     color = MaterialTheme.colorScheme.error,

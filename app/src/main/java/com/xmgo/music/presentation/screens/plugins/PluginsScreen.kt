@@ -43,6 +43,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -80,7 +81,8 @@ fun PluginsScreen(onNavigateUp: () -> Unit) {
     val pluginManager: PluginManager = getKoin().get()
     val scope = rememberCoroutineScope()
 
-    var installed by remember { mutableStateOf(pluginManager.plugins) }
+    // 响应式：安装/卸载/登录由 PluginManager.pluginsFlow 统一推送，不再快照+手动刷新
+    val installed by pluginManager.pluginsFlow.collectAsState()
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var pendingUninstall by remember { mutableStateOf<InstalledPlugin?>(null) }
@@ -136,7 +138,6 @@ fun PluginsScreen(onNavigateUp: () -> Unit) {
         busy = true
         pluginManager.installFromUri(uri) { result ->
             result.exceptionOrNull()?.let { error = it.message ?: it.toString() }
-            installed = pluginManager.plugins
             busy = false
         }
     }
@@ -291,7 +292,6 @@ fun PluginsScreen(onNavigateUp: () -> Unit) {
                                     error = null
                                     pluginManager.installFromRelease(release) { result ->
                                         result.exceptionOrNull()?.let { error = it.message ?: it.toString() }
-                                        installed = pluginManager.plugins
                                         installingId = null
                                     }
                                 }
@@ -407,7 +407,6 @@ fun PluginsScreen(onNavigateUp: () -> Unit) {
                                 installingId = updateRel.source.id
                                 pluginManager.installFromRelease(updateRel) { result ->
                                     result.exceptionOrNull()?.let { error = it.message ?: it.toString() }
-                                    installed = pluginManager.plugins
                                     installingId = null
                                     // 刷新详情里的版本快照
                                     settingsTarget = pluginManager.plugins.find { it.id == updateRel.source.id }
@@ -496,7 +495,6 @@ fun PluginsScreen(onNavigateUp: () -> Unit) {
                         if (primarySource == id) primarySource = ""
                         pluginManager.uninstallAsync(id) { result ->
                             result.exceptionOrNull()?.let { error = it.message ?: it.toString() }
-                            installed = pluginManager.plugins
                         }
                     }
                 ) { Text("移除") }
@@ -514,7 +512,6 @@ fun PluginsScreen(onNavigateUp: () -> Unit) {
                 pluginName = plugin.name,
                 onDismiss = { loginTarget = null },
                 onSessionChanged = {
-                    installed = pluginManager.plugins
                     scope.launch {
                         account = runCatching { pluginManager.accountInfo(plugin.id) }.getOrNull()
                     }

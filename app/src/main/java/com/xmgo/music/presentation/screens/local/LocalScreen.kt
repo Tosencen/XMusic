@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.LibraryMusic
@@ -40,6 +41,7 @@ import com.xmgo.music.R
 import com.xmgo.music.data.repository.MediaStoreRepository
 import com.xmgo.music.playback.PlayerController
 import com.xmgo.music.playback.toMediaItem
+import com.xmgo.music.presentation.shared_components.MiniPlayerBottomReserve
 import com.xmgo.music.presentation.shared_components.SongRow
 import kotlinx.coroutines.launch
 import org.koin.compose.getKoin
@@ -136,9 +138,9 @@ fun LocalScreen(
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 108.dp)
+                    contentPadding = PaddingValues(bottom = MiniPlayerBottomReserve)
                 ) {
-                    items(songs, key = { it.id }) { song ->
+                    itemsIndexed(songs, key = { _, it -> it.id }) { index, song ->
                         SongRow(
                             title = song.title,
                             artworkUrl = com.xmgo.music.data.repository.MediaStoreRepository.albumArtUri(song.albumId).toString(),
@@ -148,7 +150,6 @@ fun LocalScreen(
                             isPlaying = playerState.isPlaying &&
                                 playerState.current?.mediaId == song.mediaId,
                             onClick = {
-                                val index = songs.indexOfFirst { it.id == song.id }
                                 playerController.playQueue(
                                     songs.map { it.toMediaItem() },
                                     startIndex = index

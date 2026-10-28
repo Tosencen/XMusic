@@ -65,7 +65,6 @@ import com.xmgo.music.data.datastore.SearchHistoryStore
 import com.xmgo.music.data.datastore.rememberPrimarySource
 import com.xmgo.music.data.cache.CachedMusicStore
 import com.xmgo.music.playback.PlayerController
-import com.xmgo.music.playback.playSongsStaged
 import com.xmgo.music.plugin.PluginManager
 import com.xmgo.music.plugin.model.OnlineAlbum
 import com.xmgo.music.plugin.model.OnlineArtist
@@ -73,6 +72,7 @@ import com.xmgo.music.plugin.model.Song
 import com.xmgo.music.presentation.shared_components.ResolvingIndicator
 import com.xmgo.music.presentation.shared_components.SongActionsMenu
 import com.xmgo.music.presentation.shared_components.SongRow
+import com.xmgo.music.presentation.shared_components.rememberStagedPlayer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -165,7 +165,7 @@ fun SearchScreen(
     var query by rememberSaveable { mutableStateOf("") }
     var inputFocused by remember { mutableStateOf(false) }
 
-    val plugins = remember { pluginManager.plugins }
+    val plugins by pluginManager.pluginsFlow.collectAsState()
     val primarySource by rememberPrimarySource()
 
     var hotWords by remember { mutableStateOf(pageCache.hotWords) }
@@ -202,12 +202,14 @@ fun SearchScreen(
     var artistCursors by remember { mutableStateOf<Map<String, String?>>(emptyMap()) }
     var albumCursors by remember { mutableStateOf<Map<String, String?>>(emptyMap()) }
     var loading by remember { mutableStateOf(false) }
-    var resolving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     val playerState by playerController.ui.collectAsState()
+    val staged = rememberStagedPlayer(pluginManager, playerController, cachedMusicStore)
 
-    var searchJob: Job? = null
+    // 必须 remember 持有：普通局部变量每次重组重置为 null，旧搜索协程无法取消，
+    // 多个搜索并发写结果产生竞态（结果互相覆盖 / loading 提前置 false）
+    var searchJob by remember { mutableStateOf<Job?>(null) }
 
     fun clearResults() {
         songs = emptyList()
@@ -433,20 +435,12 @@ fun SearchScreen(
 
     fun playOnline(index: Int) {
         if (songs.isEmpty()) return
-        focusManager.clearFocus()
-        recordHistory()
-        scope.launch {
-            resolving = true
-            val ok = playSongsStaged(
-                songs, index, pluginManager, playerController, cachedMusicStore
-            ) {
-                resolving = false
-            }
-            if (!ok) {
-                resolving = false
-                error = "解析播放地址失败"
-            }
+        // 起播前收起键盘 + 记录搜索历史（StagedPlayer.onStart 回调）
+        staged.onStart = {
+            focusManager.clearFocus()
+            recordHistory()
         }
+        staged.playAt(songs, index)
     }
 
     Scaffold { padding ->
@@ -513,7 +507,8 @@ fun SearchScreen(
                     CategoryChip("专辑", selected = tab == 2) { tab = 2 }
                 }
 
-                error?.let {
+                // 搜索错误 + staged 播放失败合并展示
+                (error ?: staged.error)?.let {
                     Text(
                         text = it,
                         color = MaterialTheme.colorScheme.error,
@@ -572,7 +567,7 @@ fun SearchScreen(
                 }
             }
 
-            ResolvingIndicator(resolving)
+            ResolvingIndicator(staged.resolving)
         }
     }
 }
@@ -712,7 +707,7 @@ private fun SongResults(
         return
     }
     LazyColumn(contentPadding = PaddingValues(bottom = 32.dp)) {
-        itemsIndexed(results, key = { index, it -> "${it.sourceId}:${it.rawId}_$index" }) { index, song ->
+        itemsIndexed(results, key = { _, it -> "${it.sourceId}:${it.rawId}" }) { index, song ->
             val mediaId = "${song.sourceId}:${song.rawId}"
             SongActionsMenu(
                 song = song,

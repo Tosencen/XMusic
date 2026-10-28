@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -27,7 +28,6 @@ import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.LibraryMusic
-import com.xmgo.music.presentation.shared_components.CircleBackdropWavyIndicator
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -38,10 +38,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -49,7 +52,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -58,15 +63,19 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.xmgo.music.data.cache.CachedMusicStore
 import com.xmgo.music.playback.PlayerController
-import com.xmgo.music.playback.playSongsStaged
 import com.xmgo.music.plugin.PluginManager
 import com.xmgo.music.plugin.model.OnlineAlbum
 import com.xmgo.music.plugin.model.OnlineCollection
 import com.xmgo.music.plugin.model.Song
+import com.xmgo.music.presentation.shared_components.MiniPlayerBottomReserve
 import com.xmgo.music.presentation.shared_components.PlayModeToggleIcon
 import com.xmgo.music.presentation.shared_components.ResolvingIndicator
+import com.xmgo.music.presentation.shared_components.SkeletonBlock
 import com.xmgo.music.presentation.shared_components.SongActionsMenu
 import com.xmgo.music.presentation.shared_components.SongRow
+import com.xmgo.music.presentation.shared_components.rememberSkeletonPulse
+import com.xmgo.music.presentation.shared_components.rememberStagedPlayer
+import com.xmgo.music.presentation.shared_components.stableKeys
 import kotlinx.coroutines.launch
 import org.koin.compose.getKoin
 
@@ -90,10 +99,10 @@ fun OnlineDetailScreen(
 
     var detail by remember { mutableStateOf<OnlineCollection?>(null) }
     var loading by remember { mutableStateOf(true) }
-    var resolving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val playerState by playerController.ui.collectAsState()
     val cachedMusicStore: CachedMusicStore = getKoin().get()
+    val staged = rememberStagedPlayer(pluginManager, playerController, cachedMusicStore)
     val cachedList by cachedMusicStore.cached.collectAsState()
     val batchProgress by cachedMusicStore.batchProgress.collectAsState()
     var actionsSong by remember { mutableStateOf<Song?>(null) }
@@ -106,35 +115,34 @@ fun OnlineDetailScreen(
             loading = false
         } ?: run { loading = true }
         error = null
-        runCatching {
+        try {
             val provider = pluginManager.providerFor(sourceId)
-            when (kind) {
+            val loaded = when (kind) {
                 "album" -> provider.albumDetails(id)
                 "artist" -> provider.artistDetails(id)
                 else -> provider.playlistDetails(id)
             }
-        }.onSuccess {
-            detail = it
-            detailCache.put(cacheKey, it)
+            detail = loaded
+            detailCache.put(cacheKey, loaded)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (detail == null) error = e.message ?: e.toString()
         }
-            .onFailure {
-                if (detail == null) error = it.message ?: it.toString()
-            }
         loading = false
     }
 
-    fun playAt(songs: List<com.xmgo.music.plugin.model.Song>, index: Int) {
-        if (songs.isEmpty()) return
-        scope.launch {
-            resolving = true
-            val ok = playSongsStaged(
-                songs, index, pluginManager, playerController, cachedMusicStore
-            ) {
-                resolving = false
-            }
-            if (!ok) {
-                resolving = false
-                error = "解析播放地址失败"
+    val listState = rememberLazyListState()
+    // 头部高度（px）：滚动进度用它归一化，驱动顶栏标题渐显
+    var headerHeightPx by remember { mutableIntStateOf(0) }
+    // 0 = 头部完整可见（顶栏无标题），1 = 头部滚出（顶栏标题完全显示）
+    val titleProgress by remember {
+        derivedStateOf {
+            when {
+                listState.firstVisibleItemIndex > 0 -> 1f
+                headerHeightPx <= 0 -> 0f
+                else -> (listState.firstVisibleItemScrollOffset.toFloat() / headerHeightPx)
+                    .coerceIn(0f, 1f)
             }
         }
     }
@@ -142,8 +150,25 @@ fun OnlineDetailScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                // 标题只在下方 CollectionHeader 大字展示，顶栏仅留返回（避免重复标题）
-                title = {},
+                // 折叠标题：大标题在下方 CollectionHeader 展示，滚出视口时顶栏标题原位渐显，
+                // 避免滚动后完全不知道当前在浏览哪个歌单
+                title = {
+                    detail?.let { d ->
+                        Text(
+                            text = d.name,
+                            style = MaterialTheme.typography.titleLarge
+                                .copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.graphicsLayer {
+                                alpha = titleProgress
+                                // 轻微上滑入场，位移在绘制阶段计算，不触发重组
+                                translationY = (1f - titleProgress) * 20.dp.toPx()
+                            }
+                        )
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateUp) {
                         Icon(
@@ -151,7 +176,10 @@ fun OnlineDetailScreen(
                             contentDescription = "返回"
                         )
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
             )
         }
     ) { padding ->
@@ -161,9 +189,8 @@ fun OnlineDetailScreen(
                 .padding(padding)
         ) {
             when {
-                loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircleBackdropWavyIndicator()
-                }
+                // 首次进入（无缓存）：骨架屏占位（呼吸脉冲），内容结构所见即所得
+                loading && detail == null -> DetailSkeleton()
 
                 error != null && detail == null -> Box(
                     modifier = Modifier.fillMaxSize(),
@@ -203,13 +230,15 @@ fun OnlineDetailScreen(
                     val allCached = remember(myMediaIds, cachedIds) {
                         myMediaIds.isNotEmpty() && myMediaIds.all { it in cachedIds }
                     }
+                    // 歌曲 key 预计算：不混入 index，且重复曲目（#n 后缀）保证唯一
+                    val songKeys = remember(d.songs) { stableKeys(d.songs) { it.id } }
                     val batch = batchProgress
                     val runningMine = batch != null && batch.mediaIds.any { it in myMediaIds }
-                    LazyColumn(contentPadding = PaddingValues(bottom = 108.dp)) {
+                    LazyColumn(state = listState, contentPadding = PaddingValues(bottom = MiniPlayerBottomReserve)) {
                         item {
                             CollectionHeader(
                                 detail = d,
-                                onPlayAll = { playAt(d.songs, 0) },
+                                onPlayAll = { staged.playAt(d.songs, 0) },
                                 shuffleEnabled = playerState.shuffleEnabled,
                                 onToggleShuffle = { playerController.toggleShuffle() },
                                 downloadFraction = if (runningMine && batch != null) batch.fraction else null,
@@ -220,7 +249,8 @@ fun OnlineDetailScreen(
                                         runningMine -> cachedMusicStore.cancelBatch()
                                         !allCached -> cachedMusicStore.cacheAll(d.songs)
                                     }
-                                }
+                                },
+                                onHeightMeasured = { headerHeightPx = it }
                             )
                         }
                         if (d.songs.isEmpty()) {
@@ -234,7 +264,7 @@ fun OnlineDetailScreen(
                         } else {
                             itemsIndexed(
                                 d.songs,
-                                key = { index, it -> "${it.id}_$index" }
+                                key = { index, _ -> songKeys[index] }
                             ) { index, song ->
                                 val mediaId = "${song.sourceId}:${song.rawId}"
                                 SongActionsMenu(
@@ -254,7 +284,7 @@ fun OnlineDetailScreen(
                                         isPlaying = playerState.isPlaying &&
                                             playerState.current?.mediaId == mediaId,
                                         onLongClick = { actionsSong = song },
-                                        onClick = { playAt(d.songs, index) }
+                                        onClick = { staged.playAt(d.songs, index) }
                                     )
                                 }
                             }
@@ -284,7 +314,19 @@ fun OnlineDetailScreen(
                 }
             }
 
-            ResolvingIndicator(resolving)
+            // 播放失败提示（加载失败走上方 detail==null 分支；这里覆盖内容已加载的场景）
+            staged.error?.let { message ->
+                Text(
+                    text = message,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 120.dp)
+                )
+            }
+
+            ResolvingIndicator(staged.resolving)
         }
     }
 }
@@ -298,9 +340,15 @@ private fun CollectionHeader(
     downloadFraction: Float? = null,
     downloadAllDone: Boolean = false,
     downloadEnabled: Boolean = true,
-    onDownloadClick: () -> Unit = {}
+    onDownloadClick: () -> Unit = {},
+    onHeightMeasured: (Int) -> Unit = {}
 ) {
-    Column(modifier = Modifier.fillMaxWidth().padding(20.dp)) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .onSizeChanged { onHeightMeasured(it.height) }
+            .padding(20.dp)
+    ) {
         Row(verticalAlignment = Alignment.Top) {
             Box(
                 modifier = Modifier
@@ -390,8 +438,64 @@ private fun CollectionHeader(
     }
 }
 
-/** 歌单下载按钮：空闲 ⬇ / 下载中进度圆环（点击取消）/ 全部已缓存 ✓。 */
+/**
+ * 详情页骨架屏：布局与 CollectionHeader + 歌曲行一一对应（封面块 + 标题/元信息条 +
+ * 按钮行 + N 行歌曲占位），呼吸脉冲透明度，加载期间内容结构所见即所得。
+ */
 @Composable
+private fun DetailSkeleton() {
+    val pulse = rememberSkeletonPulse()
+    LazyColumn(contentPadding = PaddingValues(bottom = MiniPlayerBottomReserve)) {
+        // 头部占位：封面 110dp + 右侧标题/元信息/简介条 + 按钮行
+        item {
+            Column(modifier = Modifier.fillMaxWidth().padding(20.dp)) {
+                Row(verticalAlignment = Alignment.Top) {
+                    SkeletonBlock(
+                        alpha = pulse,
+                        modifier = Modifier.size(110.dp),
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        SkeletonBlock(alpha = pulse, modifier = Modifier.fillMaxWidth(0.7f).height(22.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        SkeletonBlock(alpha = pulse, modifier = Modifier.fillMaxWidth(0.45f).height(14.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        SkeletonBlock(alpha = pulse, modifier = Modifier.fillMaxWidth().height(12.dp))
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    SkeletonBlock(alpha = pulse, modifier = Modifier.height(40.dp).width(120.dp), shape = RoundedCornerShape(50))
+                    SkeletonBlock(alpha = pulse, modifier = Modifier.size(48.dp), shape = RoundedCornerShape(50))
+                    SkeletonBlock(alpha = pulse, modifier = Modifier.size(48.dp), shape = RoundedCornerShape(50))
+                }
+            }
+        }
+        // 歌曲行占位：40dp 封面 + 标题/副标题双条，尺寸与 SongRow 一致
+        items(10) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 10.dp)
+            ) {
+                SkeletonBlock(alpha = pulse, modifier = Modifier.size(40.dp), shape = RoundedCornerShape(8.dp))
+                Spacer(modifier = Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    SkeletonBlock(alpha = pulse, modifier = Modifier.fillMaxWidth(0.55f).height(16.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
+                    SkeletonBlock(alpha = pulse, modifier = Modifier.fillMaxWidth(0.35f).height(12.dp))
+                }
+            }
+        }
+    }
+}
+
+/** 歌单下载按钮：空闲 ⬇ / 下载中进度圆环（点击取消）/ 全部已缓存 ✓。 */@Composable
 private fun DownloadPlaylistButton(
     progress: Float?,
     allDone: Boolean,

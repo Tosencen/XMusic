@@ -18,6 +18,8 @@ object LrcParser {
 
     private val timeTag = Regex("""\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?]""")
     private val wordTag = Regex("""<(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?>""")
+    /** TTML 行内空白折叠（循环内逐行调用，提为常量避免重复编译）。 */
+    private val TtmlWhitespace = Regex("""\s+""")
 
     fun parse(lrc: String?): List<LyricLine> {
         if (lrc.isNullOrBlank()) return emptyList()
@@ -146,7 +148,7 @@ object LrcParser {
                 org.xmlpull.v1.XmlPullParser.END_TAG -> if (parser.name == "p" && inP) {
                     inP = false
                     val ms = ttmlTimeToMs(begin)
-                    val line = text.toString().replace(Regex("\\s+"), " ").trim()
+                    val line = text.toString().replace(TtmlWhitespace, " ").trim()
                     if (ms != null && line.isNotEmpty()) {
                         out.append(formatLrcTime(ms)).append(line).append('\n')
                     }

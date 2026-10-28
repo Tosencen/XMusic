@@ -1,5 +1,6 @@
 package com.xmgo.music.presentation.screens.home
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -43,7 +44,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,7 +57,6 @@ import coil3.compose.AsyncImage
 import com.xmgo.music.data.datastore.rememberPrimarySource
 import com.xmgo.music.data.cache.CachedMusicStore
 import com.xmgo.music.playback.PlayerController
-import com.xmgo.music.playback.playSongsStaged
 import com.xmgo.music.plugin.PluginManager
 import com.xmgo.music.plugin.model.AccountInfo
 import com.xmgo.music.plugin.model.HomeContent
@@ -67,10 +66,12 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import com.xmgo.music.presentation.login.LoginDialog
 import com.xmgo.music.presentation.shared_components.CircleBackdropWavyIndicator
+import com.xmgo.music.presentation.shared_components.MiniPlayerBottomReserve
 import com.xmgo.music.presentation.shared_components.ResolvingIndicator
 import com.xmgo.music.presentation.shared_components.SongActionsMenu
+import com.xmgo.music.presentation.shared_components.stableKeys
 import com.xmgo.music.presentation.shared_components.SongRow
-import kotlinx.coroutines.launch
+import com.xmgo.music.presentation.shared_components.rememberStagedPlayer
 import java.util.Calendar
 import org.koin.compose.getKoin
 
@@ -89,7 +90,6 @@ fun HomeScreen(
     pluginManager: PluginManager = getKoin().get()
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
 
     // 响应式监听已装插件：首启后台下载完成后自动出现，无需重启
     val plugins by pluginManager.pluginsFlow.collectAsState()
@@ -108,11 +108,15 @@ fun HomeScreen(
     var homeContent by remember { mutableStateOf<HomeContent?>(cached.content) }
     var loading by remember { mutableStateOf(cached.content == null) }
     var error by remember { mutableStateOf<String?>(null) }
-    var resolving by remember { mutableStateOf(false) }
     var refreshTick by remember { mutableIntStateOf(0) }
     var showLogin by remember { mutableStateOf(false) }
     var account by remember { mutableStateOf<AccountInfo?>(cached.account) }
+    // 当前展示内容所属音源：切主音源才清空旧内容，同音源下拉刷新保留旧内容原地换新
+    var loadedSourceId by remember {
+        mutableStateOf<String?>(if (cached.content != null) cached.primaryId else null)
+    }
     val cachedMusicStore: CachedMusicStore = getKoin().get()
+    val staged = rememberStagedPlayer(pluginManager, playerController, cachedMusicStore)
     var actionsSong by remember { mutableStateOf<Song?>(null) }
 
     val playerState by playerController.ui.collectAsState()
@@ -125,6 +129,7 @@ fun HomeScreen(
         ) {
             homeContent = snapshot.content
             account = snapshot.account
+            loadedSourceId = snapshot.primaryId
             loading = false
             error = null
             return@LaunchedEffect
@@ -134,41 +139,42 @@ fun HomeScreen(
             homeContent = null
             return@LaunchedEffect
         }
-        // 切主音源后：清空旧音源内容再加载，失败时展示错误而非残留旧内容
-        homeContent = null
-        account = null
+        val sourceChanged = loadedSourceId != primary.id
+        // 仅切主音源时清空旧音源内容（失败时展示错误而非残留旧内容）；
+        // 同音源下拉刷新保留旧内容，加载完成原地替换
+        if (sourceChanged) {
+            homeContent = null
+            account = null
+        }
         loading = true
         error = null
         runCatching { pluginManager.providerFor(primary.id).home(limit = 12) }
-            .onSuccess { homeContent = it }
+            .onSuccess {
+                homeContent = it
+                loadedSourceId = primary.id
+            }
             .onFailure {
                 // 取消（页面离开/主音源切换重启）不当作加载失败展示
                 if (it is kotlinx.coroutines.CancellationException) throw it
-                error = it.message ?: it.toString()
+                if (sourceChanged || homeContent == null) {
+                    error = it.message ?: it.toString()
+                } else {
+                    // 刷新失败：保留旧内容，顶部 Toast 提示
+                    Toast
+                        .makeText(context, "刷新失败：${it.message ?: it.toString()}", Toast.LENGTH_SHORT)
+                        .show()
+                }
             }
         loading = false
         account = runCatching { pluginManager.accountInfo(primary.id) }.getOrNull()
-        homeStore.cache.value = HomeCache(
-            primaryId = primary.id,
-            content = homeContent,
-            account = account,
-            tick = refreshTick
-        )
-    }
-
-    fun playSongs(songs: List<com.xmgo.music.plugin.model.Song>, index: Int) {
-        if (songs.isEmpty()) return
-        scope.launch {
-            resolving = true
-            val ok = playSongsStaged(
-                songs, index, pluginManager, playerController, cachedMusicStore
-            ) {
-                resolving = false
-            }
-            if (!ok) {
-                resolving = false
-                error = "解析播放地址失败"
-            }
+        // 仅在内容确实属于当前音源时写缓存，避免把加载失败的空/旧内容标记为该音源的新鲜缓存
+        if (loadedSourceId == primary.id) {
+            homeStore.cache.value = HomeCache(
+                primaryId = primary.id,
+                content = homeContent,
+                account = account,
+                tick = refreshTick
+            )
         }
     }
 
@@ -237,8 +243,8 @@ fun HomeScreen(
                 isRefreshing = refreshing,
                 state = refreshState,
                 onRefresh = {
+                    // 保留旧内容原地刷新，不走全屏 loading（内容跟手弹回后静默换新）
                     refreshing = true
-                    homeContent = null
                     loading = true
                     error = null
                     refreshTick++
@@ -279,7 +285,7 @@ fun HomeScreen(
                     onOpenPlaylist = { pl ->
                         onNavigateToDetail("playlist", primary.id, pl.id, pl.name)
                     },
-                    onPlaySong = { index -> playSongs(content.songs, index) },
+                    onPlaySong = { index -> staged.playAt(content.songs, index) },
                     onLongPressSong = { actionsSong = it },
                     actionsSong = actionsSong,
                     onDismissActions = { actionsSong = null }
@@ -290,7 +296,7 @@ fun HomeScreen(
                     // 空状态块在可见区域（MiniPlayer 上方）上下居中，而非全屏几何居中
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(bottom = 108.dp),
+                        .padding(bottom = MiniPlayerBottomReserve),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -322,7 +328,7 @@ fun HomeScreen(
         }
     }
 
-    ResolvingIndicator(resolving)
+    ResolvingIndicator(staged.resolving)
 
     if (showLogin && primary != null && pluginManager.hasCapability(primary.id, "login")) {
         LoginDialog(
@@ -348,9 +354,11 @@ private fun HomeContentList(
     actionsSong: Song? = null,
     onDismissActions: () -> Unit = {}
 ) {
+    // 每日推荐 key 预计算：不混入 index，列表头部增删时后续项 key 不变（组合状态可复用）
+    val songKeys = remember(content.songs) { stableKeys(content.songs) { it.id } }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 108.dp)
+        contentPadding = PaddingValues(bottom = MiniPlayerBottomReserve)
     ) {
         content.sections.forEach { section ->
             item(key = "hdr_${section.title}") {
@@ -373,7 +381,8 @@ private fun HomeContentList(
             item(key = "hdr_推荐歌单") { SectionHeader("推荐歌单") }
             items(
                 content.playlists.chunked(2),
-                key = { chunk -> chunk.joinToString { it.id } }
+                // 取块首 id 作 key：整块 joinToString 每次求值都拼长串，分块变化时 key 全量改
+                key = { chunk -> chunk.first().id }
             ) { chunk ->
                 Row(
                     modifier = Modifier
@@ -396,7 +405,7 @@ private fun HomeContentList(
             item(key = "hdr_每日推荐") { SectionHeader("每日推荐") }
             itemsIndexed(
                 content.songs,
-                key = { index, song -> "${song.id}_$index" }
+                key = { index, _ -> songKeys[index] }
             ) { index, song ->
                 val mediaId = "${song.sourceId}:${song.rawId}"
                 SongActionsMenu(

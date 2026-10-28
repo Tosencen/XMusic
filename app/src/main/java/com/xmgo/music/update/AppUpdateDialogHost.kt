@@ -38,6 +38,7 @@ fun AppUpdateDialogHost() {
     val scope = rememberCoroutineScope()
     var downloading by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf<Pair<Long, Long>?>(null) }
+    var downloadJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     AlertDialog(
         onDismissRequest = { if (!downloading) updater.consume() },
@@ -79,23 +80,24 @@ fun AppUpdateDialogHost() {
                 enabled = !downloading,
                 onClick = {
                     downloading = true
-                    scope.launch {
-                        runCatching { updater.download(update) { d, t -> progress = d to t } }
-                            .onSuccess { file ->
-                                updater.consume()
-                                runCatching { updater.install(file) }.onFailure {
-                                    Toast.makeText(
-                                        context, "无法启动安装：${it.message}", Toast.LENGTH_LONG
-                                    ).show()
-                                }
-                            }
-                            .onFailure {
-                                downloading = false
-                                progress = null
+                    downloadJob = scope.launch {
+                        try {
+                            val file = updater.download(update) { d, t -> progress = d to t }
+                            updater.consume()
+                            runCatching { updater.install(file) }.onFailure {
                                 Toast.makeText(
-                                    context, "下载失败：${it.message}", Toast.LENGTH_LONG
+                                    context, "无法启动安装：${it.message}", Toast.LENGTH_LONG
                                 ).show()
                             }
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            downloading = false
+                            progress = null
+                            Toast.makeText(
+                                context, "下载失败：${e.message}", Toast.LENGTH_LONG
+                            ).show()
+                        }
                     }
                 }
             ) {
@@ -104,9 +106,18 @@ fun AppUpdateDialogHost() {
         },
         dismissButton = {
             TextButton(
-                enabled = !downloading,
-                onClick = { updater.consume() }
-            ) { Text("取消") }
+                // 下载中变"取消"：终止协程（传输协作取消点会尽快停止并清理 .part）
+                enabled = true,
+                onClick = {
+                    if (downloading) {
+                        downloadJob?.cancel()
+                        downloading = false
+                        progress = null
+                    } else {
+                        updater.consume()
+                    }
+                }
+            ) { Text(if (downloading) "取消下载" else "取消") }
         }
     )
 }

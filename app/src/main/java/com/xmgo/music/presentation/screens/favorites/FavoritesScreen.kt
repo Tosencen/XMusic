@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Favorite
@@ -33,12 +34,14 @@ import androidx.compose.ui.unit.dp
 import com.xmgo.music.data.cache.CachedMusicStore
 import com.xmgo.music.data.datastore.FavoritesStore
 import com.xmgo.music.playback.PlayerController
-import com.xmgo.music.playback.playSongsStaged
 import com.xmgo.music.plugin.PluginManager
 import com.xmgo.music.plugin.model.Song
+import com.xmgo.music.presentation.shared_components.EmptyState
+import com.xmgo.music.presentation.shared_components.MiniPlayerBottomReserve
 import com.xmgo.music.presentation.shared_components.ResolvingIndicator
 import com.xmgo.music.presentation.shared_components.SongActionsMenu
 import com.xmgo.music.presentation.shared_components.SongRow
+import com.xmgo.music.presentation.shared_components.rememberStagedPlayer
 import kotlinx.coroutines.launch
 import org.koin.compose.getKoin
 
@@ -58,24 +61,7 @@ fun FavoritesScreen(onNavigateUp: () -> Unit) {
     val favorites by favoritesStore.favorites.collectAsState(initial = emptyList())
     val playerState by playerController.ui.collectAsState()
 
-    var resolving by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    fun playAt(index: Int) {
-        if (favorites.isEmpty()) return
-        scope.launch {
-            resolving = true
-            val ok = playSongsStaged(
-                favorites, index, pluginManager, playerController, cachedMusicStore
-            ) {
-                resolving = false
-            }
-            if (!ok) {
-                resolving = false
-                error = "解析播放地址失败"
-            }
-        }
-    }
+    val staged = rememberStagedPlayer(pluginManager, playerController, cachedMusicStore)
 
     Scaffold(
         topBar = {
@@ -94,50 +80,24 @@ fun FavoritesScreen(onNavigateUp: () -> Unit) {
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize()) {
             if (favorites.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Rounded.FavoriteBorder,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .padding(bottom = 12.dp)
-                                .size(40.dp)
-                        )
-                        Text(
-                            text = "还没有收藏歌曲",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "全屏播放页点击心形按钮即可收藏",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                    }
-                }
+                EmptyState(
+                    icon = Icons.Rounded.FavoriteBorder,
+                    title = "还没有收藏歌曲",
+                    hint = "全屏播放页点击心形按钮即可收藏",
+                    modifier = Modifier.padding(padding)
+                )
             } else {
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding),
-                    contentPadding = PaddingValues(bottom = 108.dp)
+                    contentPadding = PaddingValues(bottom = MiniPlayerBottomReserve)
                 ) {
-                    items(
+                    itemsIndexed(
                         favorites,
-                        key = { "${it.sourceId}:${it.rawId}" }
-                    ) { song ->
+                        key = { _, it -> "${it.sourceId}:${it.rawId}" }
+                    ) { index, song ->
                         val mediaId = "${song.sourceId}:${song.rawId}"
-                        val index = favorites.indexOfFirst {
-                            "${it.sourceId}:${it.rawId}" == mediaId
-                        }
                         SongActionsMenu(
                             song = song,
                             expanded = actionsSong == song,
@@ -155,7 +115,7 @@ fun FavoritesScreen(onNavigateUp: () -> Unit) {
                                 isPlaying = playerState.isPlaying &&
                                     playerState.current?.mediaId == mediaId,
                                 onLongClick = { actionsSong = song },
-                                onClick = { playAt(index) },
+                                onClick = { staged.playAt(favorites, index) },
                                 trailing = {
                                     IconButton(
                                         onClick = {
@@ -176,7 +136,7 @@ fun FavoritesScreen(onNavigateUp: () -> Unit) {
                 }
             }
 
-            error?.let { message ->
+            staged.error?.let { message ->
                 Text(
                     text = message,
                     color = MaterialTheme.colorScheme.error,
@@ -189,5 +149,5 @@ fun FavoritesScreen(onNavigateUp: () -> Unit) {
         }
     }
 
-    ResolvingIndicator(resolving)
+    ResolvingIndicator(staged.resolving)
 }

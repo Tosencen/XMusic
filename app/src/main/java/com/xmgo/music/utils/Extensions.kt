@@ -19,6 +19,7 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavKey
@@ -38,7 +39,11 @@ val Context.appVersion: String
     }
 
 @Composable
-fun anyDarkColorScheme(): ColorScheme = LocalContext.current.systemDarkColorScheme()
+fun anyDarkColorScheme(): ColorScheme {
+    // 动态取色每次调用都会查询系统并生成整套 ColorScheme，remember 避免重组频繁重建
+    val context = LocalContext.current
+    return remember(context) { context.systemDarkColorScheme() }
+}
 
 fun Context.systemLightColorScheme(): ColorScheme =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
