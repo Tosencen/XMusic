@@ -2,13 +2,18 @@ package com.xmgo.music.presentation.shared_components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -18,6 +23,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -39,6 +45,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -47,8 +54,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
@@ -65,6 +74,7 @@ import com.xmgo.music.playback.PlayerController
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.sin
 import org.koin.compose.getKoin
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -108,7 +118,7 @@ fun MiniPlayer(
                     .fillMaxWidth()
                     .clip(shape)
                     .drawBehind {
-                        // 进度在绘制阶段读状态：进度变化仅重绘进度线，不触发 MiniPlayer 重组
+                        // 进度在绘制阶段读状态：进度变化仅重绘进度 tint，不触发 MiniPlayer 重组
                         val pos = playerController.positionMs.value
                         val fraction = if (state.durationMs > 0) {
                             (pos.toFloat() / state.durationMs).coerceIn(0f, 1f)
@@ -118,15 +128,22 @@ fun MiniPlayer(
                                 color = tint,
                                 size = size.copy(width = size.width * fraction)
                             )
-                            val linePx = 3.dp.toPx()
-                            drawRect(
-                                color = lineColor,
-                                topLeft = Offset(0f, size.height - linePx),
-                                size = Size(size.width * fraction, linePx)
-                            )
                         }
                     }
             ) {
+                // 绑定播放器音频会话给 Visualizer 真频谱（幂等；失败降频重试，
+                // 模拟器等无 audiofx 环境自动落到伪动画）
+                LaunchedEffect(Unit) {
+                    while (true) {
+                        val sid = playerController.audioSessionId
+                        if (sid > 0 && !com.xmgo.music.playback.EqVisualizer.available.value) {
+                            com.xmgo.music.playback.EqVisualizer.attach(sid)
+                        }
+                        kotlinx.coroutines.delay(
+                            if (com.xmgo.music.playback.EqVisualizer.available.value) 5000 else 10000
+                        )
+                    }
+                }
                 // 内容区滑动（换卡带隐喻）：封面+曲目信息跟手滑出滑入，条壳与播放按钮不动
                 val swipeAnim = remember { Animatable(0f) }
                 val animScope = rememberCoroutineScope()
@@ -286,7 +303,118 @@ fun MiniPlayer(
                         )
                     }
                 }
+
+                // 底部满宽 EQ 频谱条：生长式显隐（0-8dp 从底部长出/缩回）、整体偏缓，
+                // 贴圆角底边、被 clip 自然裁切两端
+                EqBars(
+                    isPlaying = state.isPlaying,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(horizontal = 28.dp)
+                        .height(10.dp)
+                )
             }
+        }
+    }
+}
+
+/** 迷你播放器底部满宽 EQ 频谱条：真频谱（Visualizer 数据驱动）优先，不可用时伪动画降级。 */
+@Composable
+private fun EqBars(
+    isPlaying: Boolean,
+    modifier: Modifier = Modifier
+) {
+    // 生长系数 0→1：条高按比例长出/缩回（生长式出现/消失，非透明度渐变）
+    val grow by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (isPlaying) 1f else 0f,
+        animationSpec = androidx.compose.animation.core.tween(420),
+        label = "eqGrow"
+    )
+    val realAvailable by com.xmgo.music.playback.EqVisualizer.available
+    if (realAvailable) {
+        RealEqBars(grow, modifier)
+    } else {
+        FakeEqBars(grow, modifier)
+    }
+}
+
+/** 真频谱：15Hz FFT 数据驱动（有数据才重绘，随真实音乐律动）。 */
+@Composable
+private fun RealEqBars(grow: Float, modifier: Modifier) {
+    val barColor = MaterialTheme.colorScheme.primary
+    Canvas(modifier) {
+        val bands = com.xmgo.music.playback.EqVisualizer.bands.value // 绘制阶段读
+        val bars = bands.size
+        val unit = size.width / (bars * 2.2f - 1.2f)
+        val barW = unit * 1.2f
+        val minH = 0.dp.toPx()
+        val maxH = 8.dp.toPx()
+        val corner = 1.dp.toPx()
+        for (i in 0 until bars) {
+            val norm = bands[i] * grow // 生长式：高度按 grow 比例
+            val h = minH + (maxH - minH) * norm
+            drawRoundRect(
+                color = barColor.copy(alpha = 0.18f + 0.32f * norm),
+                topLeft = Offset(i * (barW + unit), size.height - h),
+                size = Size(barW, h),
+                cornerRadius = CornerRadius(corner)
+            )
+        }
+    }
+}
+
+/** 伪动画降级（Visualizer 不可用时）：每根条独立正弦律动，生长式显隐、整体偏缓。 */
+@Composable
+private fun FakeEqBars(
+    grow: Float,
+    modifier: Modifier = Modifier
+) {
+    val transition = rememberInfiniteTransition(label = "eq")
+    // 连续时钟：所有条共用时间轴，但每根用自己的速度/相位 → 各蹦各的、不像波浪
+    // 不用 by 委托：State 在 Canvas 绘制阶段读 → 只重绘不重组（防卡顿）
+    val phaseState = transition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2f * Math.PI).toFloat(),
+        animationSpec = infiniteRepeatable(tween(2600, easing = LinearEasing)),
+        label = "eqPhase"
+    )
+    // 每根条的确定性随机参数（seed 固定=形态稳定不跳变）
+    // 速度取整数倍（1/2/3）：phase 2π→0 循环点 sin(n·2π+φ)=sin(φ) 无缝——
+    // 非整数速度在循环点形态突变=每 1.8s"重置"一下的观感
+    val barParams = remember {
+        List(32) { i ->
+            val r = java.util.Random(i * 7919L + 31)
+            floatArrayOf(
+                r.nextFloat() * 2f * Math.PI.toFloat(),        // 相位
+                (1 + r.nextInt(3)).toFloat(),                  // 速度（整数倍速）
+                0.12f + r.nextFloat() * 0.88f                  // 基准高度权重
+            )
+        }
+    }
+    val barColor = MaterialTheme.colorScheme.primary
+    Canvas(modifier) {
+        val phase = phaseState.value // 绘制阶段读：帧驱动重绘、不触发重组
+        val bars = barParams.size
+        val unit = size.width / (bars * 2.2f - 1.2f) // 条:隙 ≈ 1.5:2.5
+        val barW = unit * 1.2f
+        val minH = 0.dp.toPx()
+        val maxH = 8.dp.toPx()
+        val corner = 1.dp.toPx() // 小圆角=条状（全圆角会像胶囊/点）
+        for (i in 0 until bars) {
+            val p0 = barParams[i][0]
+            val speed = barParams[i][1]
+            val bias = barParams[i][2]
+            // 条自身正弦 × 基准权重 × 生长系数 → 高度随 grow 长出/缩回
+            val wave = (sin(phase * speed + p0) * 0.5f + 0.5f)
+            val norm = (wave * 0.65f + bias * 0.35f) * grow
+            val h = minH + (maxH - minH) * norm
+            drawRoundRect(
+                color = barColor.copy(alpha = 0.18f + 0.32f * norm),
+                topLeft = Offset(i * (barW + unit), size.height - h),
+                size = Size(barW, h),
+                cornerRadius = CornerRadius(corner)
+            )
         }
     }
 }

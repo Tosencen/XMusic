@@ -12,6 +12,7 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.PlaylistPlay
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -78,6 +79,8 @@ private fun SongActionsDropdown(
 ) {
     val favoritesStore: FavoritesStore = getKoin().get()
     val cachedMusicStore: CachedMusicStore = getKoin().get()
+    val playerController: com.xmgo.music.playback.PlayerController = getKoin().get()
+    val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
 
     val favorites by favoritesStore.favorites.collectAsState(initial = emptyList())
@@ -98,6 +101,21 @@ private fun SongActionsDropdown(
         // 对齐 app 浮层圆角规范（默认 Menu 圆角仅 4dp，太小）
         shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
     ) {
+        DropdownMenuItem(
+            text = { Text("下一首播放") },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Rounded.PlaylistPlay,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            onClick = {
+                playerController.playNext(song)
+                android.widget.Toast.makeText(context, "已添加到下一首播放", android.widget.Toast.LENGTH_SHORT).show()
+                onDismiss()
+            }
+        )
         DropdownMenuItem(
             text = { Text(if (isFavorite) "取消收藏" else "收藏") },
             leadingIcon = {

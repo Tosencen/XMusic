@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -26,9 +25,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -79,8 +76,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
@@ -196,11 +195,11 @@ fun PlayerScreen(onNavigateUp: () -> Unit) {
     }
     // 把手拖拽跟手位移（下滑关闭：过阈值退出，否则弹簧回位）
     val sheetDrag = remember { androidx.compose.animation.core.Animatable(0f) }
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFF0B0B0F))
-    )
+    // scrim 在 Nav 层独立淡入淡出（不跟弹窗滑动）——拖拽进度写共享状态供其衰减透明度
+    androidx.compose.runtime.LaunchedEffect(sheetDrag.value) {
+        com.xmgo.music.playback.PlayerSheetState.dragProgress.floatValue =
+            (sheetDrag.value / 330f).coerceIn(0f, 1f)
+    }
     FluidBackground(
         artworkUri = state.current?.mediaMetadata?.artworkUri,
         fallbackColors = fallbackColors,
@@ -360,6 +359,7 @@ fun PlayerScreen(onNavigateUp: () -> Unit) {
                             onDragStart = { totalDrag = 0f },
                             onDragEnd = {
                                 if (totalDrag > threshold) {
+                                    // 弹层 exit（slideOut+fadeOut）接管滑出观感
                                     onNavigateUp()
                                 } else {
                                     scope.launch {

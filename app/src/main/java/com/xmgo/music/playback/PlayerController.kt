@@ -84,6 +84,10 @@ class PlayerController(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var future: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
+
+    /** 当前播放器音频会话（Visualizer 真频谱绑定用；未就绪为 -1）。 */
+    val audioSessionId: Int
+        get() = controller?.audioSessionId ?: -1
     private var pollJob: Job? = null
     private var sleepJob: Job? = null
     /** 歌词预取防抖：连按下一首时取消未触发的预取，避免挤占插件单线程 actor。 */
@@ -274,6 +278,28 @@ class PlayerController(
         syncFromPlayer()
         persist()
         return true
+    }
+
+    /**
+     * 下一首播放：插到当前曲之后（同曲重复添加允许，与主流播放器一致）。
+     * 队列为空时直接开播。在线歌后台解析直链，失败静默（长按菜单已 toast 兜底）。
+     */
+    fun playNext(song: com.xmgo.music.plugin.model.Song) {
+        scope.launch {
+            val item = runCatching {
+                song.toMediaItem(pluginManager, cachedMusicStore)
+            }.getOrNull() ?: return@launch
+            val c = controller ?: return@launch
+            if (c.mediaItemCount == 0) {
+                playQueue(listOf(item))
+            } else {
+                val idx = (c.currentMediaItemIndex + 1).coerceAtMost(c.mediaItemCount)
+                Log.d("PlayerController", "playNext insert@$idx ${item.mediaId}")
+                c.addMediaItems(idx, listOf(item))
+                syncFromPlayer()
+                persist()
+            }
+        }
     }
 
     fun togglePlayPause() {
@@ -634,8 +660,10 @@ class PlayerController(
             var lastBuffering = false
             var lastMediaId: String? = null
             while (isActive) {
-                delay(500)
-                val c = controller ?: break
+                delay(200)
+                // 断连不 break（旧 bug：controller 临时为 null 轮询永久退出，进度冻住）——
+                // 跳过本轮继续等，重连后自动续上
+                val c = controller ?: continue
                 _positionMs.value = c.currentPosition.coerceAtLeast(0)
                 val playing = c.isPlaying
                 val buffering = c.playbackState == Player.STATE_BUFFERING

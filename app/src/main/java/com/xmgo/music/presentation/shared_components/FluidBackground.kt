@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -36,28 +37,39 @@ fun FluidBackground(
     val scrimBottom = if (appDark) Color.Black.copy(alpha = 0.85f) else Color.Black.copy(alpha = 0.72f)
 
     Box(modifier = modifier.fillMaxSize()) {
-        // 无封面时的回退渐变（始终绘制，封面模糊层不透明覆盖其上）
         val top = fallbackColors.getOrElse(0) { Color(0xFF3D5A80) }.copy(alpha = 1f)
         val mid = fallbackColors.getOrElse(1) { top }.copy(alpha = 1f)
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(top, mid, Color.Black),
-                        startY = 0f,
-                        endY = 2992f
+        if (artworkUri == null) {
+            // 无封面：主题色纵向渐变兜底
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(top, mid, Color.Black),
+                            startY = 0f,
+                            endY = 2992f
+                        )
                     )
-                )
-        )
-
-        if (artworkUri != null) {
+            )
+        } else {
+            // 有封面：纯黑打底——模糊封面的羽化边缘会透出下层颜色，形成"多一层"的光晕
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+            )
+            // 放大溢出：把 blur 的羽化边推出裁切区，消除边缘渐隐
             AsyncImage(
                 model = artworkUri,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = 1.25f
+                        scaleY = 1.25f
+                    }
                     .blur(48.dp)
             )
         }

@@ -99,17 +99,6 @@ val navPredictivePopTransform: (Int) -> ContentTransform = { _ ->
     )
 }
 
-/** 全屏播放页：竖向滑入 / 滑出。 */
-val navPlayerPushTransform = ContentTransform(
-    targetContentEnter = slideInVertically(navTween) { it } + fadeIn(navFadeTween),
-    initialContentExit = fadeOut(navFadeTween)
-)
-
-val navPlayerPopTransform = ContentTransform(
-    targetContentEnter = EnterTransition.None,
-    initialContentExit = slideOutVertically(navTween) { it } + fadeOut(navFadeTween)
-)
-
 fun NavBackStack<NavKey>.navigateBack() {
     if (size == 1) return
     removeLastOrNull()

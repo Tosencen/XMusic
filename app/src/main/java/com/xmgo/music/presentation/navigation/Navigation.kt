@@ -2,6 +2,9 @@ package com.xmgo.music.presentation.navigation
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -28,8 +31,6 @@ import com.xmgo.music.presentation.screens.search.SearchScreen
 import com.xmgo.music.presentation.screens.settings.SettingsLookAndFeel
 import com.xmgo.music.presentation.screens.settings.SettingsScreen
 import com.xmgo.music.presentation.shared_components.MiniPlayer
-import com.xmgo.music.utils.navPlayerPopTransform
-import com.xmgo.music.utils.navPlayerPushTransform
 import com.xmgo.music.utils.navPopTransform
 import com.xmgo.music.utils.navPredictivePopTransform
 import com.xmgo.music.utils.navPushTransform
@@ -40,11 +41,6 @@ private val screenTransitionMetadata =
     NavDisplay.transitionSpec { navPushTransform } +
         NavDisplay.popTransitionSpec { navPopTransform } +
         NavDisplay.predictivePopTransitionSpec { swipeEdge -> navPredictivePopTransform(swipeEdge) }
-
-private val playerTransitionMetadata =
-    NavDisplay.transitionSpec { navPlayerPushTransform } +
-        NavDisplay.popTransitionSpec { navPlayerPopTransform } +
-        NavDisplay.predictivePopTransitionSpec { _ -> navPlayerPopTransform }
 
 @Composable
 fun Nav() {
@@ -91,8 +87,7 @@ fun Nav() {
             backStack = backStack,
             onBack = { backStack.navigateBack() },
             modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background),
+                .fillMaxSize(),
             entryDecorators = listOf(
                 rememberSaveableStateHolderNavEntryDecorator(),
                 rememberViewModelStoreNavEntryDecorator()
@@ -214,16 +209,12 @@ fun Nav() {
                         onNavigateUp = backStack::navigateBack
                     )
                 }
-
-                entry<Screen.Player>(
-                    metadata = playerTransitionMetadata
-                ) {
-                    PlayerScreen(
-                        onNavigateUp = backStack::navigateBack
-                    )
-                }
             }
         )
+
+        // 播放页真底部弹窗：弹层形态（下层真实渲染、缝隙实时透出），
+        // 不走 Nav entry——弹窗与页面共存，关闭无重组空档
+        var showPlayer by remember { mutableStateOf(false) }
 
         // 悬浮播放模块：仅首页与音乐列表页显示（搜索/设置等次级页面不显示）
         val showMiniPlayer = when (backStack.lastOrNull()) {
@@ -246,9 +237,46 @@ fun Nav() {
             ) {
                 MiniPlayer(
                     playerController = playerController,
-                    onOpenPlayer = { backStack.navigate(Screen.Player) }
+                    onOpenPlayer = { showPlayer = true }
                 )
             }
+        }
+        // 播放页 scrim：独立淡入淡出（不跟弹窗滑动——标准底部弹窗行为），
+        // 拖拽时透明度随 PlayerSheetState.dragProgress 衰减到 0
+        androidx.compose.animation.AnimatedVisibility(
+            visible = showPlayer,
+            enter = androidx.compose.animation.fadeIn(
+                androidx.compose.animation.core.tween(380)
+            ),
+            exit = androidx.compose.animation.fadeOut(
+                androidx.compose.animation.core.tween(380)
+            ),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            val drag by com.xmgo.music.playback.PlayerSheetState.dragProgress
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Color.Black.copy(alpha = 0.5f * (1f - drag.coerceIn(0f, 1f)))
+                    )
+            )
+        }
+        // 播放页弹层（最上层）：从下滑入/滑出，关闭时下层（首页等）始终真实可见
+        val sheetTween = androidx.compose.animation.core.tween<Float>(380)
+        val sheetOffsetTween = androidx.compose.animation.core.tween<androidx.compose.ui.unit.IntOffset>(380)
+        androidx.compose.animation.AnimatedVisibility(
+            visible = showPlayer,
+            enter = androidx.compose.animation.slideInVertically(
+                animationSpec = sheetOffsetTween
+            ) { it } + androidx.compose.animation.fadeIn(sheetTween),
+            exit = androidx.compose.animation.slideOutVertically(
+                animationSpec = sheetOffsetTween
+            ) { it } + androidx.compose.animation.fadeOut(sheetTween)
+        ) {
+            PlayerScreen(
+                onNavigateUp = { showPlayer = false }
+            )
         }
     }
 }

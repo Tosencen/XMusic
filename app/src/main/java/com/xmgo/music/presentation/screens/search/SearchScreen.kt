@@ -1,5 +1,10 @@
 package com.xmgo.music.presentation.screens.search
 
+import android.content.Intent
+import android.speech.RecognizerIntent
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,6 +32,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.SearchOff
 import androidx.compose.material3.CircularProgressIndicator
@@ -163,6 +169,19 @@ fun SearchScreen(
 
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var query by rememberSaveable { mutableStateOf("") }
+    // 语音搜索：调系统识别器（RecognizerIntent），返回文本填入搜索框——
+    // query 变化由 LaunchedEffect(query, tab) 自动触发搜索（含防抖/缓存）
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val speechLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val heard = result.data
+            ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            ?.firstOrNull()
+        if (!heard.isNullOrBlank()) {
+            query = heard
+        }
+    }
     var inputFocused by remember { mutableStateOf(false) }
 
     val plugins by pluginManager.pluginsFlow.collectAsState()
@@ -502,6 +521,25 @@ fun SearchScreen(
                                     Icon(
                                         Icons.Rounded.Close,
                                         contentDescription = "清除"
+                                    )
+                                }
+                                // 语音搜索：与清除按钮互斥（仅无关键词时展示）
+                                else -> IconButton(onClick = {
+                                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                        putExtra(
+                                            RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                                            RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                                        )
+                                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
+                                        putExtra(RecognizerIntent.EXTRA_PROMPT, "说出歌名或歌手")
+                                    }
+                                    runCatching { speechLauncher.launch(intent) }.onFailure {
+                                        Toast.makeText(context, "当前设备不支持语音输入", Toast.LENGTH_SHORT).show()
+                                    }
+                                }) {
+                                    Icon(
+                                        Icons.Rounded.Mic,
+                                        contentDescription = "语音搜索"
                                     )
                                 }
                             }
