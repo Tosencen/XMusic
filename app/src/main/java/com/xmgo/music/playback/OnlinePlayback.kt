@@ -29,9 +29,19 @@ suspend fun Song.toMediaItem(
 ): MediaItem {
     val mediaId = "$sourceId:$rawId"
     // 命中本地缓存：免解析、免联网，且不受流地址过期影响
-    val uri: String = cache?.localUriFor(mediaId)?.toString()
-        ?: pluginManager.providerFor(sourceId).resolveStream(this).url
-    // 注：media3 1.11 不支持 per-item HTTP headers，个别需要 header 的源暂不支持
+    val localUri = cache?.localUriFor(mediaId)?.toString()
+    val uri: String = if (localUri != null) {
+        // 本地文件无需请求头；清掉旧登记防止误注入
+        StreamHeaders.remove(mediaId)
+        localUri
+    } else {
+        val stream = pluginManager.providerFor(sourceId).resolveStream(this)
+        // media3 的 MediaItem 无法携带 per-item HTTP 头，先登记，
+        // 由 HeaderInjectingDataSource 在真正发起请求时按 mediaId 注入
+        //（B 站等防盗链源必须带 Referer + UA，否则 CDN 返回 403）
+        StreamHeaders.put(mediaId, stream.headers)
+        stream.url
+    }
     return MediaItem.Builder()
         .setMediaId(mediaId)
         .setUri(uri)

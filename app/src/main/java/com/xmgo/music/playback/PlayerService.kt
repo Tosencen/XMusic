@@ -63,9 +63,11 @@ class PlayerService : MediaSessionService() {
             .readTimeout(20, TimeUnit.SECONDS)
             .build()
         val upstream = DefaultDataSource.Factory(this, OkHttpDataSource.Factory(okHttp))
+        // 按 mediaId 注入插件登记的防盗链请求头（Referer/UA 等），B 站等源必需
+        val headerInjecting = HeaderInjectingDataSourceFactory(upstream)
         val cacheFactory = CacheDataSource.Factory()
             .setCache(cacheOf(this))
-            .setUpstreamDataSourceFactory(upstream)
+            .setUpstreamDataSourceFactory(headerInjecting)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
 
         // 音乐场景：更快起播，更远缓冲，弱网少卡顿

@@ -66,6 +66,11 @@ class PluginCatalog(private val httpClient: OkHttpClient) {
                 "soda", "汽水音乐",
                 "搜索、播放、歌词、扫码登录与用户歌单",
                 "MiaM1ku/qplayer-soda-plugin"
+            ),
+            CatalogSource(
+                "bilibili", "哔哩哔哩",
+                "搜索、播放 B 站音乐与音频内容",
+                "TIMER-succ/qplayer-bilibili-source"
             )
         )
 
