@@ -1,5 +1,6 @@
 package com.xmgo.music.presentation.screens.settings.components
 
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -27,6 +28,7 @@ import com.xmgo.music.R
 fun SettingsScaffold(
     title: String,
     onNavigateUp: () -> Unit,
+    actions: @Composable RowScope.() -> Unit = {},
     content: @Composable () -> Unit
 ) {
     Scaffold(
@@ -35,6 +37,7 @@ fun SettingsScaffold(
         topBar = {
             TopAppBar(
                 title = { Text(title) },
+                actions = actions,
                 navigationIcon = {
                     IconButton(
                         onClick = onNavigateUp,
