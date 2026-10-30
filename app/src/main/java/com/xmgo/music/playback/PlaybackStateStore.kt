@@ -88,7 +88,7 @@ class PlaybackStateStore(private val context: Context) {
                     .setTitle(title)
                     .setArtist(artist)
                     .setAlbumTitle(album)
-                    .setArtworkUri(artworkUri?.let(android.net.Uri::parse))
+                    .setArtworkUri(artworkUri?.let(android.net.Uri::parse) ?: DEFAULT_ARTWORK_URI)
                     // setDurationMs 只接受 null 或 >=0，TIME_UNSET(负数) 会抛 IllegalArgumentException
                     .setDurationMs(if (durationMs > 0) durationMs else null)
                     .build()

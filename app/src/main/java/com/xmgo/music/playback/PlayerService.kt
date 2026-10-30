@@ -94,6 +94,8 @@ class PlayerService : MediaSessionService() {
 
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(sessionActivity)
+            // 封面缺失/加载失败 → 默认封面（通知永不空窗，避免 ROM 系统占位图顶上）
+            .setBitmapLoader(FallbackBitmapLoader(this))
             .build()
 
         setMediaNotificationProvider(

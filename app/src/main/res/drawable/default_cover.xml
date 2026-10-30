@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    通知/锁屏默认封面（1:1）：深色圆角底 + 启动图标同款 2 条白色圆头波浪线。
+    用于无封面歌曲（本地无专辑图、插件歌无 artworkUrl、流地址封面 404 等）
+    ——通知封面永不空窗，避免部分 ROM 用自己的系统占位图顶上。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 深色圆角底（rx=24，任何蒙版下不露直角） -->
+    <path
+        android:pathData="M24,0 H84 A24,24 0 0 1 108,24 V84 A24,24 0 0 1 84,108 H24 A24,24 0 0 1 0,84 V24 A24,24 0 0 1 24,0 Z"
+        android:fillColor="#1C1E24" />
+    <!-- 与 ic_launcher_foreground 同款两条波浪线（含线宽/圆帽整体约 47.5x40，居中） -->
+    <path
+        android:pathData="M34,43 C37,36 41,36 44,43 C47,50 51,50 54,43 C57,36 61,36 64,43 C67,50 71,50 74,43"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="7.5" />
+    <path
+        android:pathData="M34,65 C37,58 41,58 44,65 C47,72 51,72 54,65 C57,58 61,58 64,65 C67,72 71,72 74,65"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="7.5" />
+</vector>

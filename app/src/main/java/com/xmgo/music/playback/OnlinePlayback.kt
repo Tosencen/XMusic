@@ -52,7 +52,7 @@ suspend fun Song.toMediaItem(
                 .setTitle(name)
                 .setArtist(artists.joinToString(" / ").ifEmpty { null })
                 .setAlbumTitle(album)
-                .setArtworkUri(artworkUrl?.let(Uri::parse))
+                .setArtworkUri(artworkUrl?.let(Uri::parse) ?: DEFAULT_ARTWORK_URI)
                 // setDurationMs 只接受 null 或 >=0，TIME_UNSET(负数) 会抛 IllegalArgumentException
             .setDurationMs(if (durationMs > 0) durationMs else null)
                 .build()
