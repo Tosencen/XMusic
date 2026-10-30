@@ -25,6 +25,7 @@ import com.xmgo.music.playback.PlayerController
 import com.xmgo.music.presentation.screens.about.AboutScreen
 import com.xmgo.music.presentation.screens.home.HomeScreen
 import com.xmgo.music.presentation.screens.player.PlayerScreen
+import com.xmgo.music.presentation.screens.cloud.CloudMusicScreen
 import com.xmgo.music.presentation.screens.search.SearchScreen
 import com.xmgo.music.presentation.screens.settings.SettingsLookAndFeel
 import com.xmgo.music.presentation.screens.settings.SettingsScreen
@@ -148,6 +149,13 @@ fun Nav() {
                     )
                 }
 
+                entry<Screen.CloudMusic>(
+                    metadata = screenTransitionMetadata
+                ) {
+                    CloudMusicScreen(
+                        onNavigateUp = backStack::navigateBack
+                    )
+                }
                 entry<Screen.CachedMusic>(
                     metadata = screenTransitionMetadata
                 ) {
@@ -221,6 +229,7 @@ fun Nav() {
             Screen.Recent,
             Screen.Favorites,
             Screen.CachedMusic,
+            Screen.CloudMusic,
             Screen.Search,
             is Screen.OnlineDetail -> true
 

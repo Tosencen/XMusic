@@ -151,7 +151,8 @@ fun LocalScreen(
                     itemsIndexed(songs, key = { _, it -> it.id }) { index, song ->
                         SongRow(
                             title = song.title,
-                            artworkUrl = com.xmgo.music.data.repository.MediaStoreRepository.albumArtUri(song.albumId).toString(),
+                            // 内嵌专辑图时有时无，统一用应用默认封面
+                            useDefaultCover = true,
                             subtitle = "${song.artist} · ${song.album}",
                             durationMs = song.durationMs,
                             isCurrent = playerState.current?.mediaId == song.mediaId,

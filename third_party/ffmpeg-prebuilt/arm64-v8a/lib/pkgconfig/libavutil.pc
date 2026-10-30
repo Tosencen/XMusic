@@ -1,0 +1,14 @@
+prefix=/Users/chen/Desktop/XMMusic/third_party/ffmpeg-prebuilt/arm64-v8a
+exec_prefix=${prefix}
+libdir=/Users/chen/Desktop/XMMusic/third_party/ffmpeg-prebuilt/arm64-v8a/lib
+includedir=/Users/chen/Desktop/XMMusic/third_party/ffmpeg-prebuilt/arm64-v8a/include
+
+Name: libavutil
+Description: FFmpeg utility library
+Version: 59.39.100
+Requires: 
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavutil -pthread -lm -latomic -landroid -lmediandk
+Libs.private: 
+Cflags: -I${includedir}

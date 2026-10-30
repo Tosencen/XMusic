@@ -47,4 +47,7 @@
 
     <!-- 通用 -->
     <string name="back">返回</string>
+
+    <!-- 网盘资源（设置页分组标题：网盘音乐 / 网盘音源管理 / 流畅模式） -->
+    <string name="cloud_resource">网盘资源</string>
 </resources>

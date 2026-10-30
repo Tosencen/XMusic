@@ -7,11 +7,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Construction
 import androidx.compose.material.icons.rounded.Done
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -33,9 +35,12 @@ fun CloudSourceSheet(onDismiss: () -> Unit) {
     val primary by CloudSourceManager.primary
     val scope = rememberCoroutineScope()
     var loginTarget by remember { mutableStateOf<CloudSourceType?>(null) }
+    // skipPartiallyExpanded：弹起即完整展开，不然默认停在半屏、两个音源卡有一半在屏幕外
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = sheetState,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
@@ -72,7 +77,7 @@ fun CloudSourceSheet(onDismiss: () -> Unit) {
                     source = source,
                     isPrimary = primary == source.type,
                     onSetPrimary = { CloudSourceManager.setPrimary(source.type) },
-                    onLogin = { loginTarget = source.type },
+                    onLogin = { if (source.type.supported) loginTarget = source.type },
                     onLogout = { CloudSourceManager.logout(source.type) }
                 )
                 Spacer(Modifier.height(10.dp))
@@ -118,6 +123,8 @@ private fun SourceCard(
         CloudSourceType.ALIYUN -> Color(0xFFFF6A00)
         CloudSourceType.QUARK -> Color(0xFF2E6BFF)
     }
+    // 未支持的源（夸克）整卡降透明度，视觉上就是「不可用」
+    val supported = source.type.supported
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -130,6 +137,7 @@ private fun SourceCard(
                 if (isPrimary) MaterialTheme.colorScheme.primary.copy(alpha = 0.06f)
                 else MaterialTheme.colorScheme.surfaceContainer
             )
+            .then(if (supported) Modifier else Modifier.alpha(0.55f))
             .padding(16.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -157,7 +165,8 @@ private fun SourceCard(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = if (source.loggedIn) "已登录" + (source.nickname?.let { " · $it" } ?: "")
+                    text = if (!supported) "待开发 · 敬请期待"
+                    else if (source.loggedIn) "已登录" + (source.nickname?.let { " · $it" } ?: "")
                     else "未登录",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -187,6 +196,16 @@ private fun SourceCard(
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = onLogout) {
                     Text("退出登录", color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                }
+            } else if (!supported) {
+                FilledTonalButton(onClick = {}, enabled = false) {
+                    Icon(
+                        imageVector = Icons.Rounded.Construction,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("待开发", fontSize = 13.sp)
                 }
             } else {
                 FilledTonalButton(onClick = onLogin) { Text("登录", fontSize = 13.sp) }

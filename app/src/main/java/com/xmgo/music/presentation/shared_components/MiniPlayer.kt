@@ -14,6 +14,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -64,12 +65,15 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.xmgo.music.R
 import com.xmgo.music.data.datastore.FavoritesStore
 import com.xmgo.music.data.datastore.toSongOrNull
+import com.xmgo.music.playback.CloudStream
 import com.xmgo.music.playback.PlayerController
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
@@ -200,8 +204,24 @@ fun MiniPlayer(
                                 alpha = 1f - frac * 0.85f
                             }
                     ) {
-                    val artwork = state.current?.mediaMetadata?.artworkUri
-                    if (artwork != null) {
+                    val mediaId = state.current?.mediaId
+                    // 网盘 / 本地统一用应用自带默认封面：
+                    // 云盘根本不给缩略图（artworkUri 为空），本地内嵌专辑图质量参差、
+                    // 有的有图有的没图。与其在「网络图 / 空占位」之间来回跳变，
+                    // 不如固定一张，视觉稳定、也不用为拿不到封面去做网络/解码开销。
+                    val useDefaultCover =
+                        CloudStream.isCloudMediaId(mediaId) || (mediaId?.startsWith("local:") == true)
+                    val artwork = state.current?.mediaMetadata?.artworkUri?.takeUnless { useDefaultCover }
+                    if (useDefaultCover) {
+                        Image(
+                            painter = painterResource(R.drawable.default_cover),
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(52.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                        )
+                    } else if (artwork != null) {
                         AsyncImage(
                             model = artwork,
                             contentDescription = null,

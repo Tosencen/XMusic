@@ -11,6 +11,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,6 +39,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.xmgo.music.R
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -54,6 +57,11 @@ fun SongRow(
     isPlaying: Boolean = false,
     showDuration: Boolean = true,
     artworkUrl: String? = null,
+    /**
+     * true = 忽略 [artworkUrl]，固定用应用自带默认封面（`R.drawable.default_cover`）。
+     * 本地这类源拿不到稳定封面（内嵌专辑图时有时无），统一一张比在图/占位符之间跳变更稳。
+     */
+    useDefaultCover: Boolean = false,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
     trailing: @Composable (() -> Unit)? = null,
@@ -86,7 +94,14 @@ fun SongRow(
                 .size(40.dp)
                 .clip(RoundedCornerShape(8.dp))
         ) {
-            if (artworkUrl != null) {
+            if (useDefaultCover) {
+                Image(
+                    painter = painterResource(R.drawable.default_cover),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else if (artworkUrl != null) {
                 val fallback = rememberVectorPainter(Icons.Rounded.MusicNote)
                 AsyncImage(
                     model = artworkUrl,

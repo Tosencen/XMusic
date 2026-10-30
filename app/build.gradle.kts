@@ -16,8 +16,8 @@ android {
         applicationId = "com.xmgo.music"
         minSdk = 26
         targetSdk = 37
-        versionCode = 5
-        versionName = "1.1.3"
+        versionCode = 6
+        versionName = "1.1.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -127,6 +127,8 @@ dependencies {
     implementation(libs.androidx.security.crypto)
 
     implementation(libs.androidx.media3.exoplayer)
+    // 自编 LGPL FFmpeg：补 media3 缺的 ASF/APE/AIFF/WavPack 等容器与解码
+    implementation(project(":ffmpeg-ext"))
     implementation(libs.androidx.media3.datasource.okhttp)
     implementation(libs.androidx.media3.session)
     implementation(libs.androidx.media3.common)

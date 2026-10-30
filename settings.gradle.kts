@@ -44,3 +44,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "XMMusic"
 include(":app")
+// FFmpeg 扩展：自编 LGPL FFmpeg（arm64-v8a）+ media3 decoder_ffmpeg 解码器
+// + avformat 解封装桥接（补 media3 缺失的 ASF/APE/AIFF/WavPack 等容器）
+include(":ffmpeg-ext")

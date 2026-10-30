@@ -86,21 +86,39 @@ object QrLogin {
                         "EXPIRED" -> Status.EXPIRED
                         else -> Status.UNKNOWN
                     }
-                    // CONFIRMED：bizExt=base64 → 解码 JSON 取 refreshToken
+                    // CONFIRMED：bizExt=base64 → 解码 JSON → 递归找 refreshToken（嵌套在 pds_login_result 里）
                     var token: String? = null
                     val bizExt = data.optString("bizExt").takeIf { it.isNotEmpty() }
                     if (bizExt != null) {
                         runCatching {
                             val decoded = android.util.Base64.decode(bizExt, android.util.Base64.DEFAULT)
-                            val j = JSONObject(String(decoded))
-                            token = j.optString("refreshToken").takeIf { it.isNotEmpty() }
-                                ?: j.optString("refresh_token")
+                            token = findToken(JSONObject(String(decoded)))
                         }
                     }
                     status to token
                 }
             }.onFailure { Log.w(TAG, "aliQuery failed: $it") }
         }
+
+    /** 递归找 refreshToken（bizExt 嵌套在 pds_login_result.userData 等层）。 */
+    private fun findToken(obj: JSONObject): String? {
+        obj.keys().forEach { key ->
+            val v = obj.opt(key) ?: return@forEach
+            when {
+                key.equals("refreshToken", true) || key.equals("refresh_token", true) -> {
+                    if (v is String && v.length > 20) return v
+                }
+                v is JSONObject -> findToken(v)?.let { return it }
+                v is org.json.JSONArray -> {
+                    for (i in 0 until v.length()) {
+                        val item = v.opt(i)
+                        if (item is JSONObject) findToken(item)?.let { return it }
+                    }
+                }
+            }
+        }
+        return null
+    }
 
     /** ZXing 生成二维码 Bitmap。 */
     fun qrBitmap(content: String, size: Int = 640): Bitmap? = runCatching {

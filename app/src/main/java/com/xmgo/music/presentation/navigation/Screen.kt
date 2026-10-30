@@ -27,6 +27,9 @@ sealed class Screen : NavKey {
     /** 缓存的音乐（设置 → 音乐库）。 */
     @Serializable data object CachedMusic : Screen()
 
+    /** 网盘音乐（主音源）。 */
+    @Serializable data object CloudMusic : Screen()
+
     /** 在线集合详情（kind = playlist | album | artist）。 */
     @Serializable
     data class OnlineDetail(

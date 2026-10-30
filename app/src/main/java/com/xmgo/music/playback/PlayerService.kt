@@ -63,8 +63,10 @@ class PlayerService : MediaSessionService() {
             .readTimeout(20, TimeUnit.SECONDS)
             .build()
         val upstream = DefaultDataSource.Factory(this, OkHttpDataSource.Factory(okHttp))
+        // 网盘占位 URI（cloud://…）→ 播到哪首才换真直链（阿里直链 15 分钟过期，不能预解析）
+        val cloudResolving = CloudResolvingDataSourceFactory(upstream)
         // 按 mediaId 注入插件登记的防盗链请求头（Referer/UA 等），B 站等源必需
-        val headerInjecting = HeaderInjectingDataSourceFactory(upstream)
+        val headerInjecting = HeaderInjectingDataSourceFactory(cloudResolving)
         val cacheFactory = CacheDataSource.Factory()
             .setCache(cacheOf(this))
             .setUpstreamDataSourceFactory(headerInjecting)
@@ -75,8 +77,23 @@ class PlayerService : MediaSessionService() {
             .setBufferDurationsMs(20_000, 60_000, 1_500, 3_000)
             .build()
 
+        // 网盘/本地里的 WMA·APE·AIFF 等容器 media3 原生解不了（28 个 Extractor 无 ASF），
+        // 先走 FFmpeg 解封装；mp3/flac/m4a 等仍由 media3 原生路径处理
+        val extractorsFactory = object : androidx.media3.extractor.ExtractorsFactory {
+            override fun createExtractors(): Array<androidx.media3.extractor.Extractor> =
+                arrayOf<androidx.media3.extractor.Extractor>(com.xmgo.music.ffmpeg.FfmpegExtractor()) +
+                    androidx.media3.extractor.DefaultExtractorsFactory().createExtractors()
+        }
+
         val player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(cacheFactory))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(cacheFactory, extractorsFactory))
+            // 解码扩展只作兜底（MODE_ON）：已支持的格式继续走 MediaCodec，行为不变
+            .setRenderersFactory(
+                androidx.media3.exoplayer.DefaultRenderersFactory(this)
+                    .setExtensionRendererMode(
+                        androidx.media3.exoplayer.DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
+                    )
+            )
             .setLoadControl(loadControl)
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
