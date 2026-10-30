@@ -131,19 +131,6 @@ fun MiniPlayer(
                         }
                     }
             ) {
-                // 绑定播放器音频会话给 Visualizer 真频谱（幂等；失败降频重试，
-                // 模拟器等无 audiofx 环境自动落到伪动画）
-                LaunchedEffect(Unit) {
-                    while (true) {
-                        val sid = playerController.audioSessionId
-                        if (sid > 0 && !com.xmgo.music.playback.EqVisualizer.available.value) {
-                            com.xmgo.music.playback.EqVisualizer.attach(sid)
-                        }
-                        kotlinx.coroutines.delay(
-                            if (com.xmgo.music.playback.EqVisualizer.available.value) 5000 else 10000
-                        )
-                    }
-                }
                 // 内容区滑动（换卡带隐喻）：封面+曲目信息跟手滑出滑入，条壳与播放按钮不动
                 val swipeAnim = remember { Animatable(0f) }
                 val animScope = rememberCoroutineScope()
@@ -319,7 +306,7 @@ fun MiniPlayer(
     }
 }
 
-/** 迷你播放器底部满宽 EQ 频谱条：真频谱（Visualizer 数据驱动）优先，不可用时伪动画降级。 */
+/** 迷你播放器底部满宽 EQ 频谱条：每根条独立正弦律动，生长式显隐、整体偏缓。 */
 @Composable
 private fun EqBars(
     isPlaying: Boolean,
@@ -328,48 +315,9 @@ private fun EqBars(
     // 生长系数 0→1：条高按比例长出/缩回（生长式出现/消失，非透明度渐变）
     val grow by androidx.compose.animation.core.animateFloatAsState(
         targetValue = if (isPlaying) 1f else 0f,
-        animationSpec = androidx.compose.animation.core.tween(420),
+        animationSpec = tween(420),
         label = "eqGrow"
     )
-    val realAvailable by com.xmgo.music.playback.EqVisualizer.available
-    if (realAvailable) {
-        RealEqBars(grow, modifier)
-    } else {
-        FakeEqBars(grow, modifier)
-    }
-}
-
-/** 真频谱：15Hz FFT 数据驱动（有数据才重绘，随真实音乐律动）。 */
-@Composable
-private fun RealEqBars(grow: Float, modifier: Modifier) {
-    val barColor = MaterialTheme.colorScheme.primary
-    Canvas(modifier) {
-        val bands = com.xmgo.music.playback.EqVisualizer.bands.value // 绘制阶段读
-        val bars = bands.size
-        val unit = size.width / (bars * 2.2f - 1.2f)
-        val barW = unit * 1.2f
-        val minH = 0.dp.toPx()
-        val maxH = 8.dp.toPx()
-        val corner = 1.dp.toPx()
-        for (i in 0 until bars) {
-            val norm = bands[i] * grow // 生长式：高度按 grow 比例
-            val h = minH + (maxH - minH) * norm
-            drawRoundRect(
-                color = barColor.copy(alpha = 0.18f + 0.32f * norm),
-                topLeft = Offset(i * (barW + unit), size.height - h),
-                size = Size(barW, h),
-                cornerRadius = CornerRadius(corner)
-            )
-        }
-    }
-}
-
-/** 伪动画降级（Visualizer 不可用时）：每根条独立正弦律动，生长式显隐、整体偏缓。 */
-@Composable
-private fun FakeEqBars(
-    grow: Float,
-    modifier: Modifier = Modifier
-) {
     val transition = rememberInfiniteTransition(label = "eq")
     // 连续时钟：所有条共用时间轴，但每根用自己的速度/相位 → 各蹦各的、不像波浪
     // 不用 by 委托：State 在 Canvas 绘制阶段读 → 只重绘不重组（防卡顿）

@@ -85,9 +85,6 @@ class PlayerController(
     private var future: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
 
-    /** 当前播放器音频会话（Visualizer 真频谱绑定用；未就绪为 -1）。 */
-    val audioSessionId: Int
-        get() = controller?.audioSessionId ?: -1
     private var pollJob: Job? = null
     private var sleepJob: Job? = null
     /** 歌词预取防抖：连按下一首时取消未触发的预取，避免挤占插件单线程 actor。 */
