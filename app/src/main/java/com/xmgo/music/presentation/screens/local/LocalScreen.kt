@@ -31,7 +31,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -89,6 +92,12 @@ fun LocalScreen(
     }
 
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    // 定位到正在播放：本列表里有没有这首歌、在哪一行（-1 = 不在本列表）
+    val currentMediaId = playerState.current?.mediaId
+    val currentIndex = remember(songs, currentMediaId) {
+        songs.indexOfFirst { it.mediaId == currentMediaId }
+    }
+    var locatePulse by remember { mutableStateOf(false) }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -104,10 +113,26 @@ fun LocalScreen(
             )
         },
         floatingActionButton = {
-            com.xmgo.music.presentation.shared_components.ScrollToTopButton(
-                listState = listState,
+            androidx.compose.foundation.layout.Column(
+                horizontalAlignment = Alignment.End,
                 modifier = Modifier.padding(bottom = 164.dp)
-            )
+            ) {
+                com.xmgo.music.presentation.shared_components.ScrollToCurrentButton(
+                    listState = listState,
+                    currentIndex = currentIndex,
+                    onLocated = {
+                        scope.launch {
+                            locatePulse = true
+                            kotlinx.coroutines.delay(1200)
+                            locatePulse = false
+                        }
+                    }
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                com.xmgo.music.presentation.shared_components.ScrollToTopButton(
+                    listState = listState
+                )
+            }
         }
     ) { padding ->
         Box(
@@ -156,6 +181,7 @@ fun LocalScreen(
                             subtitle = "${song.artist} · ${song.album}",
                             durationMs = song.durationMs,
                             isCurrent = playerState.current?.mediaId == song.mediaId,
+                            highlightPulse = locatePulse,
                             isPlaying = playerState.isPlaying &&
                                 playerState.current?.mediaId == song.mediaId,
                             onClick = {

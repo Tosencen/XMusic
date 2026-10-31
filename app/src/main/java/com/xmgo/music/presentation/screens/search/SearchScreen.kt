@@ -43,6 +43,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -66,6 +67,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.xmgo.music.data.datastore.SearchHistoryStore
 import com.xmgo.music.data.datastore.rememberPrimarySource
@@ -185,6 +187,10 @@ fun SearchScreen(
     var inputFocused by remember { mutableStateOf(false) }
 
     val plugins by pluginManager.pluginsFlow.collectAsState()
+    // 音源小尾巴标签：插件名取两字（网易/酷狗/QQ/哔哩），与 CloudTrackRow 的来源 chip 同形态。
+    // 搜索是全音源并行混排，跨源不去重（distinctBy sourceId:rawId），
+    // 不标来源的话同一首歌的多源结果看着像重复 bug。
+    val sourceLabels = remember(plugins) { plugins.associate { it.id to it.name.take(2) } }
     val primarySource by rememberPrimarySource()
 
     var hotWords by remember { mutableStateOf(pageCache.hotWords) }
@@ -586,6 +592,7 @@ fun SearchScreen(
                         when (tab) {
                             1 -> ArtistResults(
                                 results = artists,
+                                sourceLabels = sourceLabels,
                                 hasMore = artistCursors.values.any { !it.isNullOrBlank() },
                                 onLoadMore = ::loadMore,
                                 onOpen = { hit ->
@@ -597,6 +604,7 @@ fun SearchScreen(
                             )
                             2 -> AlbumResults(
                                 results = albums,
+                                sourceLabels = sourceLabels,
                                 hasMore = albumCursors.values.any { !it.isNullOrBlank() },
                                 onLoadMore = ::loadMore,
                                 onOpen = { hit ->
@@ -608,6 +616,7 @@ fun SearchScreen(
                             )
                             else -> SongResults(
                                 results = songs,
+                                sourceLabels = sourceLabels,
                                 hasMore = songCursors.values.any { it.isNullOrBlank().not() },
                                 playerState = playerState,
                                 onLoadMore = ::loadMore,
@@ -742,6 +751,7 @@ private fun HistoryAndHotSearch(
 @Composable
 private fun SongResults(
     results: List<Song>,
+    sourceLabels: Map<String, String> = emptyMap(),
     hasMore: Boolean,
     playerState: PlayerController.UiState,
     loading: Boolean,
@@ -786,7 +796,11 @@ private fun SongResults(
                     isCurrent = playerState.current?.mediaId == mediaId,
                     isPlaying = playerState.isPlaying && playerState.current?.mediaId == mediaId,
                     onLongClick = { onLongPressSong(song) },
-                    onClick = { onPlay(index) }
+                    onClick = { onPlay(index) },
+                    trailing = {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        SourceChip(sourceLabels[song.sourceId] ?: song.sourceId)
+                    }
                 )
             }
         }
@@ -804,6 +818,7 @@ private fun SongResults(
 @Composable
 private fun ArtistResults(
     results: List<ArtistHit>,
+    sourceLabels: Map<String, String> = emptyMap(),
     hasMore: Boolean,
     onLoadMore: () -> Unit,
     onOpen: (ArtistHit) -> Unit
@@ -828,6 +843,7 @@ private fun ArtistResults(
                     hit.artist.songCount.takeIf { it > 0 }?.let { "$it 首" }
                 ).joinToString(" · "),
                 round = true,
+                sourceLabel = sourceLabels[hit.sourceId],
                 onClick = { onOpen(hit) }
             )
         }
@@ -845,6 +861,7 @@ private fun ArtistResults(
 @Composable
 private fun AlbumResults(
     results: List<AlbumHit>,
+    sourceLabels: Map<String, String> = emptyMap(),
     hasMore: Boolean,
     onLoadMore: () -> Unit,
     onOpen: (AlbumHit) -> Unit
@@ -866,9 +883,10 @@ private fun AlbumResults(
                 title = hit.album.name,
                 subtitle = listOfNotNull(
                     "专辑",
-                    hit.album.artists.joinToString(" / ").ifEmpty { null }
+                    hit.album.artists.joinToString(" / ") { it.name }.ifEmpty { null }
                 ).joinToString(" · "),
                 round = false,
+                sourceLabel = sourceLabels[hit.sourceId],
                 onClick = { onOpen(hit) }
             )
         }
@@ -889,6 +907,7 @@ private fun ResultRow(
     title: String,
     subtitle: String,
     round: Boolean,
+    sourceLabel: String? = null,
     onClick: () -> Unit
 ) {
     Row(
@@ -939,6 +958,29 @@ private fun ResultRow(
                 overflow = TextOverflow.Ellipsis
             )
         }
+        if (sourceLabel != null) {
+            Spacer(modifier = Modifier.width(8.dp))
+            SourceChip(sourceLabel)
+        }
+    }
+}
+
+/**
+ * 音源小尾巴：插件名两字缩写，形态与 [com.xmgo.music.presentation.screens.cloud] 的来源 chip 一致。
+ * 只是标签不是筛选——用户点标签不跳转，避免误触。
+ */
+@Composable
+private fun SourceChip(label: String) {
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+    ) {
+        Text(
+            text = label,
+            fontSize = 10.sp,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+        )
     }
 }
 

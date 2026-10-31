@@ -2,6 +2,7 @@ package com.xmgo.music.presentation.shared_components
 
 import coil3.compose.AsyncImage
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -32,7 +33,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
@@ -62,6 +65,12 @@ fun SongRow(
      * 本地这类源拿不到稳定封面（内嵌专辑图时有时无），统一一张比在图/占位符之间跳变更稳。
      */
     useDefaultCover: Boolean = false,
+    /**
+     * 正在播放行的背景闪两下。给「定位到正在播放」用（见 [ScrollToCurrentButton]）：
+     * 滚到位之后那一行本来就是高亮的，但一闪才能让人一眼认出是哪一行。
+     * 只在 [isCurrent] 为真时才生效，传给其它行无副作用。
+     */
+    highlightPulse: Boolean = false,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
     trailing: @Composable (() -> Unit)? = null,
@@ -72,6 +81,16 @@ fun SongRow(
     } else {
         Modifier.clickable(onClick = onClick)
     }
+    // 正在播放行的底色：平时 0.45，被定位时闪两下提醒
+    val currentBgAlpha = remember { Animatable(0.45f) }
+    LaunchedEffect(highlightPulse) {
+        if (highlightPulse && isCurrent) {
+            repeat(2) {
+                currentBgAlpha.animateTo(0.95f, tween(170))
+                currentBgAlpha.animateTo(0.45f, tween(170))
+            }
+        }
+    }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
@@ -81,7 +100,7 @@ fun SongRow(
                 if (isCurrent) {
                     it.padding(horizontal = 8.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f))
+                        .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = currentBgAlpha.value))
                         .padding(horizontal = 12.dp)
                 } else {
                     it.padding(horizontal = 20.dp)

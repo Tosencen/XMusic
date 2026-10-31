@@ -1,6 +1,11 @@
 package com.xmgo.music.presentation.screens.cloud
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -17,6 +22,7 @@ import androidx.compose.ui.unit.sp
 import android.widget.Toast
 import com.xmgo.music.playback.CloudScanManager
 import com.xmgo.music.playback.CloudSourceManager
+import com.xmgo.music.playback.CloudStream
 import com.xmgo.music.playback.CloudTrack
 import com.xmgo.music.playback.PlayerController
 import com.xmgo.music.playback.toMediaItem
@@ -38,6 +44,19 @@ fun CloudMusicScreen(
     val scanning by CloudScanManager.scanning.collectAsState()
     val primary by CloudSourceManager.primary
     val playerController: PlayerController = getKoin().get()
+    val playerState by playerController.ui.collectAsState()
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+
+    // 定位到正在播放：注意列表前面还有 folders.size 个文件夹项，
+    // 歌曲在 LazyColumn 里的 index = 文件夹数 + 它在 tracks 里的下标。
+    val tracksInList = result?.tracks.orEmpty()
+    val foldersInList = result?.folders.orEmpty()
+    val currentMediaId = playerState.current?.mediaId
+    val currentIndex = remember(tracksInList, currentMediaId) {
+        val i = tracksInList.indexOfFirst { CloudStream.mediaIdOf(it) == currentMediaId }
+        if (i < 0) -1 else foldersInList.size + i
+    }
+    var locatePulse by remember { mutableStateOf(false) }
 
     /**
      * 起播：网盘直链是懒解析（见 [com.xmgo.music.playback.CloudResolvingDataSource]），
@@ -87,6 +106,28 @@ fun CloudMusicScreen(
                     }
                 }
             )
+        },
+        floatingActionButton = {
+            androidx.compose.foundation.layout.Column(
+                horizontalAlignment = Alignment.End,
+                modifier = Modifier.padding(bottom = 164.dp)
+            ) {
+                com.xmgo.music.presentation.shared_components.ScrollToCurrentButton(
+                    listState = listState,
+                    currentIndex = currentIndex,
+                    onLocated = {
+                        scope.launch {
+                            locatePulse = true
+                            kotlinx.coroutines.delay(1200)
+                            locatePulse = false
+                        }
+                    }
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                com.xmgo.music.presentation.shared_components.ScrollToTopButton(
+                    listState = listState
+                )
+            }
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding)) {
@@ -164,7 +205,7 @@ fun CloudMusicScreen(
                             )
                         }
                     } else {
-                    LazyColumn {
+                    LazyColumn(state = listState) {
                         // 文件夹（下钻）
                         items(folders.size) { i ->
                             val folder = folders[i]
@@ -199,9 +240,13 @@ fun CloudMusicScreen(
                         }
                         // 音频文件
                         itemsIndexed(tracks) { index, track ->
-                            CloudTrackRow(track = track, index = index, onClick = {
-                                playFrom(tracks, index)
-                            })
+                            CloudTrackRow(
+                                track = track,
+                                index = index,
+                                isCurrent = CloudStream.mediaIdOf(track) == currentMediaId,
+                                highlightPulse = locatePulse,
+                                onClick = { playFrom(tracks, index) }
+                            )
                         }
                     }
                     }
@@ -212,25 +257,56 @@ fun CloudMusicScreen(
 }
 
 @Composable
-private fun CloudTrackRow(track: CloudTrack, index: Int, onClick: () -> Unit) {
+private fun CloudTrackRow(
+    track: CloudTrack,
+    index: Int,
+    isCurrent: Boolean = false,
+    highlightPulse: Boolean = false,
+    onClick: () -> Unit
+) {
+    // 正在播放行的底色：平时 0.45，被定位时闪两下提醒（与 SongRow 同一套）
+    val currentBgAlpha = remember { Animatable(0.45f) }
+    LaunchedEffect(highlightPulse) {
+        if (highlightPulse && isCurrent) {
+            repeat(2) {
+                currentBgAlpha.animateTo(0.95f, tween(170))
+                currentBgAlpha.animateTo(0.45f, tween(170))
+            }
+        }
+    }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
+            .then(
+                if (isCurrent) {
+                    Modifier
+                        .padding(horizontal = 8.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            MaterialTheme.colorScheme.secondaryContainer
+                                .copy(alpha = currentBgAlpha.value)
+                        )
+                } else {
+                    Modifier
+                }
+            )
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         Text(
             text = (index + 1).toString().padStart(2, '0'),
             fontSize = 13.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = if (isCurrent) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.width(32.dp)
         )
         Column(Modifier.weight(1f)) {
             Text(
                 text = track.name.substringBeforeLast('.'),
                 fontSize = 15.sp,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = if (isCurrent) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurface,
                 maxLines = 1
             )
             Text(

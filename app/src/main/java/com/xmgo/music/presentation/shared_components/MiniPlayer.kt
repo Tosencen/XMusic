@@ -40,6 +40,7 @@ import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -47,6 +48,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -76,6 +78,7 @@ import com.xmgo.music.data.datastore.toSongOrNull
 import com.xmgo.music.playback.CloudStream
 import com.xmgo.music.playback.PlayerController
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.sin
@@ -269,6 +272,8 @@ fun MiniPlayer(
                     }
 
                     // 切歌走左右滑手势（左滑下一首/右滑上一首），按钮位省给文字区
+                    // 加载态用 [rememberDelayedLoading]：预缓冲的短抖动不显示转圈
+                    val showLoading = rememberDelayedLoading(state.buffering)
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
@@ -278,12 +283,20 @@ fun MiniPlayer(
                             .background(MaterialTheme.colorScheme.secondaryContainer)
                             .clickable(onClick = playerController::togglePlayPause)
                     ) {
-                        Icon(
-                            imageVector = if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                            contentDescription = if (state.isPlaying) "暂停" else "播放",
-                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        if (showLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 1.5.dp,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        } else {
+                            Icon(
+                                imageVector = if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                contentDescription = if (state.isPlaying) "暂停" else "播放",
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                     IconButton(
                         onClick = {

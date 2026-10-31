@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -140,6 +141,12 @@ fun CachedMusicScreen(onNavigateUp: () -> Unit) {
     val selected = selection ?: emptySet()
     val inMultiSelect = selection != null
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    // 定位到正在播放：本列表里有没有这首歌、在哪一行（-1 = 不在本列表）
+    val currentMediaId = playerState.current?.mediaId
+    val currentIndex = remember(displayEntries, currentMediaId) {
+        displayEntries.indexOfFirst { FavoritesStore.mediaIdOf(it.song) == currentMediaId }
+    }
+    var locatePulse by remember { mutableStateOf(false) }
 
     fun playAt(index: Int) {
         if (displaySongs.isEmpty()) return
@@ -221,11 +228,28 @@ fun CachedMusicScreen(onNavigateUp: () -> Unit) {
         bottomBar = {},
         floatingActionButton = {
             // 多选模式隐藏：底部视觉让位给列表上方的操作栏
-            com.xmgo.music.presentation.shared_components.ScrollToTopButton(
-                listState = listState,
-                modifier = Modifier.padding(bottom = 164.dp),
-                visible = !inMultiSelect
-            )
+            androidx.compose.foundation.layout.Column(
+                horizontalAlignment = Alignment.End,
+                modifier = Modifier.padding(bottom = 164.dp)
+            ) {
+                com.xmgo.music.presentation.shared_components.ScrollToCurrentButton(
+                    listState = listState,
+                    currentIndex = currentIndex,
+                    visible = !inMultiSelect,
+                    onLocated = {
+                        scope.launch {
+                            locatePulse = true
+                            kotlinx.coroutines.delay(1200)
+                            locatePulse = false
+                        }
+                    }
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                com.xmgo.music.presentation.shared_components.ScrollToTopButton(
+                    listState = listState,
+                    visible = !inMultiSelect
+                )
+            }
         }
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
@@ -308,6 +332,7 @@ fun CachedMusicScreen(onNavigateUp: () -> Unit) {
                                 durationMs = song.durationMs,
                                 showDuration = !inMultiSelect,
                                 isCurrent = playerState.current?.mediaId == mediaId,
+                                highlightPulse = locatePulse,
                                 isPlaying = playerState.isPlaying &&
                                     playerState.current?.mediaId == mediaId,
                                 onClick = {

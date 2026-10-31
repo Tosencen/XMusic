@@ -135,6 +135,16 @@ fun OnlineDetailScreen(
     }
 
     val listState = rememberLazyListState()
+    // 定位到正在播放。**注意 index 偏移**：LazyColumn 的第 0 项是 CollectionHeader，
+    // 歌曲从第 1 项开始，所以 list index = 歌曲在 songs 里的下标 + 1。
+    // 与 CloudMusicScreen 的「+ 文件夹数」同理，都是按真实 item 数算，不能拿歌曲下标直接用。
+    val currentMediaId = playerState.current?.mediaId
+    val currentIndex = remember(detail, currentMediaId) {
+        val songs = detail?.songs ?: emptyList()
+        val i = songs.indexOfFirst { "${it.sourceId}:${it.rawId}" == currentMediaId }
+        if (i < 0) -1 else i + 1
+    }
+    var locatePulse by remember { mutableStateOf(false) }
     // 头部高度（px）：滚动进度用它归一化，驱动顶栏标题渐显
     var headerHeightPx by remember { mutableIntStateOf(0) }
     // 0 = 头部完整可见（顶栏无标题），1 = 头部滚出（顶栏标题完全显示）
@@ -185,10 +195,26 @@ fun OnlineDetailScreen(
             )
         },
         floatingActionButton = {
-            com.xmgo.music.presentation.shared_components.ScrollToTopButton(
-                listState = listState,
+            androidx.compose.foundation.layout.Column(
+                horizontalAlignment = Alignment.End,
                 modifier = Modifier.padding(bottom = 164.dp)
-            )
+            ) {
+                com.xmgo.music.presentation.shared_components.ScrollToCurrentButton(
+                    listState = listState,
+                    currentIndex = currentIndex,
+                    onLocated = {
+                        scope.launch {
+                            locatePulse = true
+                            kotlinx.coroutines.delay(1200)
+                            locatePulse = false
+                        }
+                    }
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                com.xmgo.music.presentation.shared_components.ScrollToTopButton(
+                    listState = listState
+                )
+            }
         }
     ) { padding ->
         Box(
@@ -289,6 +315,7 @@ fun OnlineDetailScreen(
                                         ).joinToString(" · "),
                                         durationMs = song.durationMs,
                                         isCurrent = playerState.current?.mediaId == mediaId,
+                                        highlightPulse = locatePulse,
                                         isPlaying = playerState.isPlaying &&
                                             playerState.current?.mediaId == mediaId,
                                         onLongClick = { actionsSong = song },
@@ -590,7 +617,7 @@ private fun AlbumCard(album: OnlineAlbum, onClick: () -> Unit) {
             overflow = TextOverflow.Ellipsis
         )
         Text(
-            text = album.artists.joinToString(" / "),
+            text = album.artists.joinToString(" / ") { it.name },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,

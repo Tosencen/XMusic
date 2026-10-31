@@ -423,6 +423,7 @@ fun PlayerScreen(onNavigateUp: () -> Unit) {
                     modifier = Modifier.size(36.dp)
                 )
             }
+            val showLoading = com.xmgo.music.presentation.shared_components.rememberDelayedLoading(state.buffering)
             FilledIconButton(
                 onClick = playerController::togglePlayPause,
                 modifier = Modifier.size(72.dp),
@@ -431,7 +432,9 @@ fun PlayerScreen(onNavigateUp: () -> Unit) {
                     contentColor = Color.Black
                 )
             ) {
-                if (state.buffering && !state.isPlaying) {
+                // 加载态同样走 [rememberDelayedLoading]，跟 MiniPlayer 一致：
+                // 预缓冲的短抖动不闪转圈
+                if (showLoading) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(30.dp),
                         color = Color.Black,
