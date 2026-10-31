@@ -16,6 +16,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # 发布说明要跨 tag 取提交历史，浅克隆拿不到上一个 tag
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -165,9 +169,60 @@ jobs:
           path: dist/*.apk
           if-no-files-found: error
 
+      # 发布说明从提交信息生成（不靠 generate_release_notes：它只按 PR 归纳，
+      # 而我们是直接 commit 到 main、没有 PR，生成出来只剩一行 compare 链接）。
+      # 每条提交输出「### 标题 + 正文」，正文本来就按 changelog 口径写的。
+      - name: Generate release notes from commits
+        id: changelog
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+
+          # 上一个发布 tag：优先取当前提交父链上最近的 tag，拿不到再按版本号排序兜底
+          PREV="$(git describe --tags --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
+          if [ -z "$PREV" ] || [ "$PREV" = "$GITHUB_REF_NAME" ]; then
+            PREV="$(git tag --sort=-v:refname | grep -vx "$GITHUB_REF_NAME" | head -1 || true)"
+          fi
+
+          if [ -n "$PREV" ]; then RANGE="${PREV}..${GITHUB_SHA}"; else RANGE="$GITHUB_SHA"; fi
+          echo "::notice::release notes 范围：${PREV:-<首版>} -> ${GITHUB_REF_NAME}"
+
+          NOTES="$RUNNER_TEMP/release-notes.md"
+          : > "$NOTES"
+          for sha in $(git rev-list --no-merges --reverse "$RANGE"); do
+            {
+              echo "### $(git log -1 --pretty=%s "$sha")"
+              echo
+              # 逐条删 trailer（BSD/GNU sed 都不支持 \| 交替，只能拆成多个 -e）
+              body="$(git log -1 --pretty=%b "$sha" \
+                | sed -e 's/[[:space:]]*$//' \
+                      -e '/^Co-Authored-By:/d' \
+                      -e '/^Co-developed-by:/d' \
+                      -e '/^Signed-off-by:/d' \
+                      -e '/^Reviewed-by:/d' \
+                      -e '/^Suggested-by:/d' \
+                      -e '/^Helped-by:/d')"
+              if [ -n "$body" ]; then printf '%s\n\n' "$body"; fi
+            } >> "$NOTES"
+          done
+
+          if [ -n "$PREV" ]; then
+            echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREV}...${GITHUB_REF_NAME}" >> "$NOTES"
+          else
+            echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/commits/${GITHUB_REF_NAME}" >> "$NOTES"
+          fi
+
+          echo "::notice::release notes $(wc -l < "$NOTES") 行"
+          {
+            echo "notes<<__NOTES_EOF__"
+            cat "$NOTES"
+            echo "__NOTES_EOF__"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*.apk
-          generate_release_notes: true
+          body: |
+            ${{ steps.changelog.outputs.notes }}
