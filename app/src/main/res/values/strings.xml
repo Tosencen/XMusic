@@ -23,6 +23,19 @@
     <string name="overlay_lyric_bg_opacity">背景不透明度</string>
     <string name="overlay_lyric_outline">文字描边</string>
     <string name="overlay_lyric_outline_desc">提高在复杂背景上的可读性</string>
+    <!-- 排版组 -->
+    <string name="overlay_lyric_line_count">显示行数</string>
+    <string name="overlay_lyric_line_count_desc">只看当前句更沉浸，少遮挡下面的内容</string>
+    <string name="overlay_lyric_line_count_1">只看当前句</string>
+    <string name="overlay_lyric_line_count_3">上 / 当前 / 下</string>
+    <string name="overlay_lyric_line_spacing">行间距</string>
+    <string name="overlay_lyric_line_spacing_desc">上一句 / 当前 / 下一句 之间的距离，窗口高度会跟着变</string>
+    <string name="overlay_lyric_trans_gap">译文间距</string>
+    <string name="overlay_lyric_trans_gap_desc">当前行与译文之间的距离，负值更紧凑</string>
+    <string name="overlay_lyric_trans_mode">译文显示</string>
+    <string name="overlay_lyric_trans_both">双语</string>
+    <string name="overlay_lyric_trans_source">只看原文</string>
+    <string name="overlay_lyric_trans_translation">只看译文</string>
     <string name="palette">配色</string>
     <string name="theme">主题</string>
     <string name="font">字体</string>

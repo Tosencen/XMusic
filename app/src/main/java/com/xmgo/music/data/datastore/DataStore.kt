@@ -31,6 +31,11 @@ data object PreferencesKeys {
     val OVERLAY_LYRIC_WIDTH = intPreferencesKey("overlay_lyric_width")
     val OVERLAY_LYRIC_BG_OPACITY = intPreferencesKey("overlay_lyric_bg_opacity")
     val OVERLAY_LYRIC_OUTLINE = booleanPreferencesKey("overlay_lyric_outline")
+    // 排版组：行距（= 字号 × pct/100）、译文与主行间距（dp，可负）、显示行数、译文显示方式
+    val OVERLAY_LYRIC_LINE_SPACING = intPreferencesKey("overlay_lyric_line_spacing")
+    val OVERLAY_LYRIC_TRANS_GAP = intPreferencesKey("overlay_lyric_trans_gap")
+    val OVERLAY_LYRIC_LINE_COUNT = intPreferencesKey("overlay_lyric_line_count")
+    val OVERLAY_LYRIC_TRANS_MODE = intPreferencesKey("overlay_lyric_trans_mode")
 }
 
 @Composable
@@ -84,3 +89,23 @@ fun rememberOverlayLyricBgOpacity() =
 @Composable
 fun rememberOverlayLyricOutline() =
     rememberPreference(key = PreferencesKeys.OVERLAY_LYRIC_OUTLINE, defaultValue = true)
+
+/** 行间距：实际行高 = 字号 × pct/100（默认 2.1 倍字号）。 */
+@Composable
+fun rememberOverlayLyricLineSpacing() =
+    rememberPreference(key = PreferencesKeys.OVERLAY_LYRIC_LINE_SPACING, defaultValue = 210)
+
+/** 译文与主行的间距（dp，可为负 = 贴紧主行）。 */
+@Composable
+fun rememberOverlayLyricTransGap() =
+    rememberPreference(key = PreferencesKeys.OVERLAY_LYRIC_TRANS_GAP, defaultValue = -3)
+
+/** 显示行数：1 = 只看当前句（沉浸），3 = 上/当前/下。 */
+@Composable
+fun rememberOverlayLyricLineCount() =
+    rememberPreference(key = PreferencesKeys.OVERLAY_LYRIC_LINE_COUNT, defaultValue = 3)
+
+/** 译文显示方式：0 = 双语，1 = 只看原文，2 = 只看译文。 */
+@Composable
+fun rememberOverlayLyricTransMode() =
+    rememberPreference(key = PreferencesKeys.OVERLAY_LYRIC_TRANS_MODE, defaultValue = 0)

@@ -60,6 +60,9 @@ object OverlayLyricWindow {
         fun onLock()
         fun onOpenApp()
         fun onClose()
+
+        /** 点击上一句/下一句歌词行 → 跳到那一句。 */
+        fun onSeek(timeMs: Long)
     }
 
     @Volatile private var wanted = false
@@ -76,7 +79,15 @@ object OverlayLyricWindow {
         val bgOpacity: Float = 0.63f,
         val dark: Boolean = true,
         val locked: Boolean = false,
-        val outline: Boolean = true
+        val outline: Boolean = true,
+        /** 行高 = 字号 × pct/100。调大窗口整体变高（高度按行高 × 可见行数算）。 */
+        val lineSpacingPct: Int = 210,
+        /** 译文与主行的间距（dp，可为负 = 紧贴主行）。 */
+        val transGapDp: Int = -3,
+        /** 1 = 只看当前句（沉浸、不挡内容），3 = 上/当前/下。 */
+        val lineCount: Int = 3,
+        /** 0 = 双语，1 = 只看原文，2 = 只看译文。 */
+        val transMode: Int = 0
     )
 
     fun setWanted(ctx: Context, on: Boolean) {
@@ -211,7 +222,7 @@ object OverlayLyricWindow {
             val v = view ?: return
             val p = params ?: return
             val s = style
-            v.configure(s.fontPx, s.bgOpacity, s.dark, s.outline)
+            v.configure(s)
             val dm = app.resources.displayMetrics
             p.width = Math.round(dm.widthPixels * s.widthPct.coerceIn(50, 100) / 100f)
             var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -277,9 +288,17 @@ object OverlayLyricWindow {
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     if (dragging) {
                         prefs.edit().putInt("x", p.x).putInt("y", p.y).apply()
-                    } else {
-                        // 单击切换操作栏显隐（打开 App 由操作栏 ↗ 按钮承担）
-                        setBarVisible(bar?.visibility != View.VISIBLE)
+                    } else if (event.actionMasked == MotionEvent.ACTION_UP) {
+                        // 点上一句/下一句 = 跳到那一句并唤出操作栏；
+                        // 点当前行或空白 = 保持老行为：单击切换操作栏显隐（打开 App 由 ↗ 承担）
+                        val target = view?.hitLineIndex(event.y) ?: -1
+                        val line = if (target >= 0) frame.lines.getOrNull(target) else null
+                        if (line != null) {
+                            actions?.onSeek(line.timeMs)
+                            setBarVisible(true)
+                        } else {
+                            setBarVisible(bar?.visibility != View.VISIBLE)
+                        }
                     }
                     dragging = false
                     return true
@@ -408,9 +427,13 @@ object OverlayLyricWindow {
         private companion object {
             const val SIDE_RATIO = 0.72f
             const val TRANSLATION_RATIO = 0.52f
-            const val TRANSLATION_GAP = -3f
             const val LINE_TRANSITION_NANOS = 380_000_000L
             const val SHADOW_OPACITY = 0.32f
+
+            /** 译文显示方式：0 = 双语，1 = 只看原文，2 = 只看译文。 */
+            const val TRANS_BOTH = 0
+            const val TRANS_SOURCE_ONLY = 1
+            const val TRANS_TRANSLATION_ONLY = 2
         }
 
         private val surfacePaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -434,6 +457,10 @@ object OverlayLyricWindow {
         private var bgOpacity = 0.63f
         private var dark = true
         private var textOutline = true
+        private var lineSpacingPct = 210
+        private var transGapDp = -3
+        private var lineCount = 3
+        private var transMode = TRANS_BOTH
         private var surface = 0xFF28282B.toInt()
         private var outlineColor = 0xFF49454F.toInt()
         private var cSung = 0xFFD0BCFF.toInt()
@@ -448,11 +475,19 @@ object OverlayLyricWindow {
         private var running = true
         private var lastLines: List<LyricLine>? = null
 
-        fun configure(newFontPx: Int, newBgOpacity: Float, newDark: Boolean, newOutline: Boolean) {
-            fontPx = newFontPx.coerceIn(12, 28)
-            bgOpacity = newBgOpacity.coerceIn(0f, 1f)
-            dark = newDark
-            textOutline = newOutline
+        fun configure(s: OverlayStyle) {
+            fontPx = s.fontPx.coerceIn(12, 28)
+            bgOpacity = s.bgOpacity.coerceIn(0f, 1f)
+            dark = s.dark
+            textOutline = s.outline
+            lineSpacingPct = s.lineSpacingPct.coerceIn(160, 320)
+            transGapDp = s.transGapDp.coerceIn(-8, 24)
+            lineCount = if (s.lineCount <= 1) 1 else 3
+            transMode = when (s.transMode) {
+                TRANS_SOURCE_ONLY -> TRANS_SOURCE_ONLY
+                TRANS_TRANSLATION_ONLY -> TRANS_TRANSLATION_ONLY
+                else -> TRANS_BOTH
+            }
             resolvePalette()
             current = null
             outgoing = null
@@ -466,6 +501,37 @@ object OverlayLyricWindow {
 
         fun stop() {
             running = false
+        }
+
+        /**
+         * 点击命中检测：点在**上一句/下一句**上返回那一句的索引，
+         * 点在当前行或空白处返回 -1（沿用「单击切换操作栏」的老行为）。
+         *
+         * 单行模式只有当前句可见，永远返回 -1——否则用户点哪儿都跳走，没法唤出操作栏。
+         */
+        fun hitLineIndex(y: Float): Int {
+            if (lineCount <= 1) return -1
+            val f = frame
+            if (f.lines.isEmpty() || !f.playing) return -1
+            val idx = LrcParser.currentIndex(f.lines, livePosMs(f, System.nanoTime()))
+            if (idx < 0) return -1
+            val slot = slotSize()
+            val delta = y - height / 2f
+            return when {
+                delta < -slot * 0.5f && idx > 0 -> idx - 1
+                delta > slot * 0.5f && idx < f.lines.size - 1 -> idx + 1
+                else -> -1
+            }
+        }
+
+        /** 播放中按帧龄外推到当前绘制时刻的位置（≤500ms 兜底，防 tick 断流时漂移）。 */
+        private fun livePosMs(f: Frame, nowNs: Long): Long {
+            var pos = f.positionMs
+            if (f.playing && f.receivedAtNs != 0L) {
+                val drift = (nowNs - f.receivedAtNs) / 1_000_000L
+                if (drift in 0..500L) pos += drift
+            }
+            return pos.coerceAtLeast(0L)
         }
 
         private fun resolvePalette() {
@@ -489,10 +555,24 @@ object OverlayLyricWindow {
         private fun mainSize(): Float =
             fontPx * resources.displayMetrics.scaledDensity * 1.15f
 
-        private fun slot(): Float = mainSize() * 2.1f
+        private fun transSize(): Float =
+            maxOf(12f * density, mainSize() * TRANSLATION_RATIO)
+
+        /** 一行歌词占的高度（= 字号 × 行距倍数），也就是上下句的中心间距。 */
+        private fun slotSize(): Float = mainSize() * lineSpacingPct / 100f
+
+        /**
+         * 主行 + 译文实际需要的最小高度。
+         * 单行模式按「译文可能存在」算：否则换到带译文的句时高度会跳，看着很晃。
+         */
+        private fun minContentHeight(): Float =
+            spacing(mainSize()) + spacing(transSize()) + transGapDp * density + 12f * density
 
         override fun onMeasure(widthSpec: Int, heightSpec: Int) {
-            setMeasuredDimension(MeasureSpec.getSize(widthSpec), Math.round(slot() * 3f))
+            val slots = if (lineCount <= 1) 1 else 3
+            var h = slotSize() * slots
+            if (slots == 1) h = maxOf(h, minContentHeight())
+            setMeasuredDimension(MeasureSpec.getSize(widthSpec), Math.round(h))
         }
 
         override fun onDetachedFromWindow() {
@@ -536,7 +616,7 @@ object OverlayLyricWindow {
             val padX = 20f * density
             val left = padX
             val width = maxOf(1f, w - padX * 2f)
-            val slot = h / 3f
+            val slot = slotSize()
             val save = canvas.save()
             canvas.clipRect(left, 0f, left + width, h)
             val out = outgoing
@@ -578,12 +658,7 @@ object OverlayLyricWindow {
                 lastLines = lines
             }
             // 播放中按帧龄外推到当前绘制时刻（≤500ms 兜底防 tick 断流时漂移）
-            var pos = f.positionMs
-            if (f.playing && f.receivedAtNs != 0L) {
-                val drift = (nowNs - f.receivedAtNs) / 1_000_000L
-                if (drift in 0..500L) pos += drift
-            }
-            pos = pos.coerceAtLeast(0L)
+            val pos = livePosMs(f, nowNs)
             out.positionMs = pos
             if (lines.isNotEmpty()) {
                 val idx = LrcParser.currentIndex(lines, pos)
@@ -619,26 +694,33 @@ object OverlayLyricWindow {
             complete: Boolean
         ) {
             if (alpha <= 0.001f) return
-            val slot = height / 3f
+            // 行高与可见行数解耦：单行模式高度只够放下主行，但上下句仍按 slot 排在两侧（被裁掉）
+            val slot = slotSize()
             val side = v.mainSize * SIDE_RATIO
-            val trans = maxOf(12f * density, v.mainSize * TRANSLATION_RATIO)
+            val trans = transSizeOf(v.mainSize)
+            // 当前行永远居中：三行模式 = 高度/2 = 1.5×slot；单行模式 = 高度/2
+            val base = height / 2f + dy
 
-            drawStatic(canvas, v.previous, side, left, slot * 0.5f + dy, width, 1f, cPrev, alpha)
+            drawStatic(canvas, v.previous, side, left, base - slot, width, 1f, cPrev, alpha)
 
-            val center = slot * 1.5f + dy
-            var mainCenter = center
-            var transCenter = center
-            val hasTranslation = v.translation.isNotEmpty()
-            if (hasTranslation) {
-                mainCenter -= (spacing(trans) + TRANSLATION_GAP * density) * 0.5f
-                transCenter += (spacing(v.mainSize) + TRANSLATION_GAP * density) * 0.5f
+            // 「只看译文」但这一句没有译文时，退回显示原文，避免中间空一格
+            val hasTranslation = v.translation.isNotEmpty() && transMode != TRANS_SOURCE_ONLY
+            val showMain = transMode != TRANS_TRANSLATION_ONLY || !hasTranslation
+            var mainCenter = base
+            var transCenter = base
+            if (hasTranslation && showMain) {
+                mainCenter -= (spacing(trans) + transGapDp * density) * 0.5f
+                transCenter += (spacing(v.mainSize) + transGapDp * density) * 0.5f
             }
-            drawCurrent(canvas, v, left, mainCenter, width, alpha, complete)
+            if (showMain) drawCurrent(canvas, v, left, mainCenter, width, alpha, complete)
             if (hasTranslation) {
                 drawStatic(canvas, v.translation, trans, left, transCenter, width, v.progress, cNext, alpha * 0.88f)
             }
-            drawStatic(canvas, v.next, side, left, slot * 2.5f + dy, width, 0f, cNext, alpha)
+            drawStatic(canvas, v.next, side, left, base + slot, width, 0f, cNext, alpha)
         }
+
+        private fun transSizeOf(mainSize: Float): Float =
+            maxOf(12f * density, mainSize * TRANSLATION_RATIO)
 
         private fun spacing(size: Float): Float {
             textPaint.textSize = size

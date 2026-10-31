@@ -50,6 +50,10 @@ class OverlayLyricManager(
         val KEY_WIDTH = intPreferencesKey("overlay_lyric_width")
         val KEY_BG_OPACITY = intPreferencesKey("overlay_lyric_bg_opacity")
         val KEY_OUTLINE = booleanPreferencesKey("overlay_lyric_outline")
+        val KEY_LINE_SPACING = intPreferencesKey("overlay_lyric_line_spacing")
+        val KEY_TRANS_GAP = intPreferencesKey("overlay_lyric_trans_gap")
+        val KEY_LINE_COUNT = intPreferencesKey("overlay_lyric_line_count")
+        val KEY_TRANS_MODE = intPreferencesKey("overlay_lyric_trans_mode")
 
         fun hasOverlayPermission(context: Context): Boolean =
             Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(context)
@@ -151,6 +155,11 @@ class OverlayLyricManager(
             }
         }
 
+        override fun onSeek(timeMs: Long) {
+            // tick 每 100ms 推一次状态，跳完不用额外刷新，下一帧自然就到新歌词
+            playerController.seekTo(timeMs)
+        }
+
         override fun onLock() {
             scope.launch { setLocked(true) }
             Toast.makeText(
@@ -182,7 +191,11 @@ class OverlayLyricManager(
             bgOpacity = (prefs[KEY_BG_OPACITY] ?: 63) / 100f,
             dark = XmgoTheme.isDark(theme, systemDark),
             locked = prefs[KEY_LOCKED] ?: false,
-            outline = prefs[KEY_OUTLINE] ?: true
+            outline = prefs[KEY_OUTLINE] ?: true,
+            lineSpacingPct = prefs[KEY_LINE_SPACING] ?: 210,
+            transGapDp = prefs[KEY_TRANS_GAP] ?: -3,
+            lineCount = prefs[KEY_LINE_COUNT] ?: 3,
+            transMode = prefs[KEY_TRANS_MODE] ?: 0
         )
     }
 

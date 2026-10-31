@@ -1,9 +1,14 @@
 package com.xmgo.music.presentation.screens.settings
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
@@ -19,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -27,8 +33,12 @@ import com.xmgo.music.R
 import com.xmgo.music.data.datastore.rememberOverlayLyricBgOpacity
 import com.xmgo.music.data.datastore.rememberOverlayLyricEnabled
 import com.xmgo.music.data.datastore.rememberOverlayLyricFontSize
+import com.xmgo.music.data.datastore.rememberOverlayLyricLineCount
+import com.xmgo.music.data.datastore.rememberOverlayLyricLineSpacing
 import com.xmgo.music.data.datastore.rememberOverlayLyricLocked
 import com.xmgo.music.data.datastore.rememberOverlayLyricOutline
+import com.xmgo.music.data.datastore.rememberOverlayLyricTransGap
+import com.xmgo.music.data.datastore.rememberOverlayLyricTransMode
 import com.xmgo.music.data.datastore.rememberOverlayLyricWidth
 import com.xmgo.music.overlay.OverlayLyricManager
 import com.xmgo.music.presentation.screens.settings.components.SettingsScaffold
@@ -55,6 +65,10 @@ private fun OverlayLyricSettingsContent() {
     var widthPct by rememberOverlayLyricWidth()
     var bgOpacity by rememberOverlayLyricBgOpacity()
     var outline by rememberOverlayLyricOutline()
+    var lineCount by rememberOverlayLyricLineCount()
+    var lineSpacing by rememberOverlayLyricLineSpacing()
+    var transGap by rememberOverlayLyricTransGap()
+    var transMode by rememberOverlayLyricTransMode()
     val context = LocalContext.current
 
     // 点了开关但尚未去授权：跳系统授权页前不落盘 true（否则没授权开关也显示开），
@@ -116,6 +130,43 @@ private fun OverlayLyricSettingsContent() {
                     valueRange = 12f..28f,
                     valueText = "$fontSize",
                     onValueChange = { fontSize = it.toInt() }
+                )
+                // ---- 排版组：行数 / 行距 / 译文 ----
+                SettingsChoiceRow(
+                    title = stringResource(R.string.overlay_lyric_line_count),
+                    description = stringResource(R.string.overlay_lyric_line_count_desc),
+                    options = listOf(
+                        stringResource(R.string.overlay_lyric_line_count_1),
+                        stringResource(R.string.overlay_lyric_line_count_3)
+                    ),
+                    selectedIndex = if (lineCount <= 1) 0 else 1,
+                    onSelect = { lineCount = if (it == 0) 1 else 3 }
+                )
+                SettingsSliderRow(
+                    title = stringResource(R.string.overlay_lyric_line_spacing),
+                    description = stringResource(R.string.overlay_lyric_line_spacing_desc),
+                    value = lineSpacing.toFloat(),
+                    valueRange = 160f..320f,
+                    valueText = "%.1f×".format(lineSpacing / 100f),
+                    onValueChange = { lineSpacing = it.toInt() }
+                )
+                SettingsSliderRow(
+                    title = stringResource(R.string.overlay_lyric_trans_gap),
+                    description = stringResource(R.string.overlay_lyric_trans_gap_desc),
+                    value = transGap.toFloat(),
+                    valueRange = -8f..24f,
+                    valueText = "${transGap}dp",
+                    onValueChange = { transGap = it.toInt() }
+                )
+                SettingsChoiceRow(
+                    title = stringResource(R.string.overlay_lyric_trans_mode),
+                    options = listOf(
+                        stringResource(R.string.overlay_lyric_trans_both),
+                        stringResource(R.string.overlay_lyric_trans_source),
+                        stringResource(R.string.overlay_lyric_trans_translation)
+                    ),
+                    selectedIndex = transMode.coerceIn(0, 2),
+                    onSelect = { transMode = it }
                 )
                 SettingsSliderRow(
                     title = stringResource(R.string.overlay_lyric_width),
@@ -180,6 +231,7 @@ private fun SettingsSliderRow(
     value: Float,
     valueRange: ClosedFloatingPointRange<Float>,
     valueText: String,
+    description: String? = null,
     onValueChange: (Float) -> Unit
 ) {
     Column(
@@ -198,10 +250,67 @@ private fun SettingsSliderRow(
                 color = MaterialTheme.colorScheme.primary
             )
         }
+        if (description != null) {
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
         Slider(
             value = value,
             onValueChange = onValueChange,
             valueRange = valueRange
         )
+    }
+}
+
+/** 单选分段（选项 2–3 个，选中态用 primary 底色）。 */
+@Composable
+private fun SettingsChoiceRow(
+    title: String,
+    options: List<String>,
+    selectedIndex: Int,
+    description: String? = null,
+    onSelect: (Int) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 8.dp)
+    ) {
+        Text(text = title, style = MaterialTheme.typography.bodyLarge)
+        if (description != null) {
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            options.forEachIndexed { i, label ->
+                val selected = i == selectedIndex
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                        )
+                        .clickable { onSelect(i) }
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (selected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
     }
 }
