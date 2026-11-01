@@ -79,6 +79,7 @@ import com.xmgo.music.plugin.model.OnlineArtist
 import com.xmgo.music.plugin.model.Song
 import com.xmgo.music.presentation.shared_components.ResolvingIndicator
 import com.xmgo.music.presentation.shared_components.SongActionsMenu
+import com.xmgo.music.presentation.shared_components.MiniPlayerBottomReserve
 import com.xmgo.music.presentation.shared_components.SongRow
 import com.xmgo.music.presentation.shared_components.rememberStagedPlayer
 import kotlinx.coroutines.CancellationException
@@ -690,7 +691,7 @@ private fun HistoryAndHotSearch(
         return
     }
     LazyColumn(
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = MiniPlayerBottomReserve)
     ) {
         if (history.isNotEmpty()) {
             item {
@@ -776,7 +777,7 @@ private fun SongResults(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 32.dp)
+            contentPadding = PaddingValues(bottom = MiniPlayerBottomReserve)
         ) {
         itemsIndexed(results, key = { _, it -> "${it.sourceId}:${it.rawId}" }) { index, song ->
             val mediaId = "${song.sourceId}:${song.rawId}"
@@ -832,7 +833,7 @@ private fun ArtistResults(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 32.dp)
+            contentPadding = PaddingValues(bottom = MiniPlayerBottomReserve)
         ) {
         itemsIndexed(results, key = { _, it -> "${it.sourceId}:${it.artist.id}" }) { _, hit ->
             ResultRow(
@@ -875,7 +876,7 @@ private fun AlbumResults(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 32.dp)
+            contentPadding = PaddingValues(bottom = MiniPlayerBottomReserve)
         ) {
         itemsIndexed(results, key = { _, it -> "${it.sourceId}:${it.album.id}" }) { _, hit ->
             ResultRow(

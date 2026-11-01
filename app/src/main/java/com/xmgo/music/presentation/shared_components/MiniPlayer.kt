@@ -90,7 +90,19 @@ import kotlin.math.roundToInt
  * 列表底部为悬浮 MiniPlayer 预留的空间（contentPadding / 空态居中用）。
  * 此前 9 处硬编码 `108.dp` 散落各屏，与 MiniPlayer 实际高度同源维护于此。
  */
-val MiniPlayerBottomReserve = 108.dp
+/**
+ * 列表底部为悬浮 MiniPlayer 预留的空间。
+ *
+ * 不是 MiniPlayer 的高度本身——胶囊是 `padding(bottom = 56.dp) + navigationBarsPadding()`
+ * 浮在导航栏之上的，遮挡区比胶囊高。实测（emulator-5554，1080×2400@440dpi）：
+ * 胶囊顶 y=1956，而 108dp(=297px) 只够把最后一行的**标题**露出，下面的副标题
+ * （文件大小/专辑名）和右侧来源 chip 会被压掉约 53px。
+ * 取 136dp 而非刚好够的 128dp：留 8dp 余量兜住设备差异——胶囊位置随
+ * navigationBarsPadding() 变化，导航栏高度不同的机器上它会上下移。
+ * 与 ScrollToTopButton 用的 164.dp 不同：那个是把圆形按钮**整体**抬到胶囊之上，
+ * 这里只要内容不被遮即可，不必留那么大空档。
+ */
+val MiniPlayerBottomReserve = 136.dp
 
 /**
  * 悬浮胶囊迷你播放模块（仅首页与音乐列表页显示）：

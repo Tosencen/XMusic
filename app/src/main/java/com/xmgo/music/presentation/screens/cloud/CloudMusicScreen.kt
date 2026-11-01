@@ -26,6 +26,7 @@ import com.xmgo.music.playback.CloudStream
 import com.xmgo.music.playback.CloudTrack
 import com.xmgo.music.playback.PlayerController
 import com.xmgo.music.playback.toMediaItem
+import com.xmgo.music.presentation.shared_components.MiniPlayerBottomReserve
 import kotlinx.coroutines.launch
 import org.koin.compose.getKoin
 
@@ -205,7 +206,11 @@ fun CloudMusicScreen(
                             )
                         }
                     } else {
-                    LazyColumn(state = listState) {
+                    LazyColumn(
+                        state = listState,
+                        // 悬浮 MiniPlayer 会挡住列表底部，滚动到底时最后一项必须能完整露出
+                        contentPadding = PaddingValues(bottom = MiniPlayerBottomReserve)
+                    ) {
                         // 文件夹（下钻）
                         items(folders.size) { i ->
                             val folder = folders[i]
