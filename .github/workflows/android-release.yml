@@ -169,48 +169,43 @@ jobs:
           path: dist/*.apk
           if-no-files-found: error
 
-      # 发布说明从提交信息生成（不靠 generate_release_notes：它只按 PR 归纳，
-      # 而我们是直接 commit 到 main、没有 PR，生成出来只剩一行 compare 链接）。
-      # 每条提交输出「### 标题 + 正文」，正文本来就按 changelog 口径写的。
-      - name: Generate release notes from commits
+      # 发布说明只取 **tag 那一条提交**的完整信息（发版提交按 changelog 口径写）。
+      # 不再把范围内每条提交都拼进去——技术提交是给维护者看的，塞进 release 正文会淹掉正经说明。
+      # 粒度历史仍可从下面的 Full Changelog compare 链接进。
+      - name: Generate release notes from tag commit
         id: changelog
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           set -euo pipefail
 
-          # 上一个发布 tag：优先取当前提交父链上最近的 tag，拿不到再按版本号排序兜底
+          NOTES="$RUNNER_TEMP/release-notes.md"
+          # tag 提交的完整信息（标题+正文）；删 git trailer（那是元数据，不是发布内容）
+          # BSD/GNU sed 都不支持 | 交替，只能拆成多个 -e
+          git log -1 --pretty=%B "$GITHUB_SHA" \
+            | sed -e 's/[[:space:]]*$//' \
+                  -e '/^Co-Authored-By:/d' \
+                  -e '/^Co-developed-by:/d' \
+                  -e '/^Signed-off-by:/d' \
+                  -e '/^Reviewed-by:/d' \
+                  -e '/^Suggested-by:/d' \
+                  -e '/^Helped-by:/d' > "$NOTES"
+
+          # 上一个发布 tag，只为拼 compare 链接。
+          # 优先取当前提交父链上最近的 tag，拿不到再按版本号排序兜底
           PREV="$(git describe --tags --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
           if [ -z "$PREV" ] || [ "$PREV" = "$GITHUB_REF_NAME" ]; then
             PREV="$(git tag --sort=-v:refname | grep -vx "$GITHUB_REF_NAME" | head -1 || true)"
           fi
+          echo "::notice::release notes 来自 tag 提交 ${GITHUB_SHA}；上一版 ${PREV:-<首版>}"
 
-          if [ -n "$PREV" ]; then RANGE="${PREV}..${GITHUB_SHA}"; else RANGE="$GITHUB_SHA"; fi
-          echo "::notice::release notes 范围：${PREV:-<首版>} -> ${GITHUB_REF_NAME}"
-
-          NOTES="$RUNNER_TEMP/release-notes.md"
-          : > "$NOTES"
-          for sha in $(git rev-list --no-merges --reverse "$RANGE"); do
-            {
-              echo "### $(git log -1 --pretty=%s "$sha")"
-              echo
-              # 逐条删 trailer（BSD/GNU sed 都不支持 \| 交替，只能拆成多个 -e）
-              body="$(git log -1 --pretty=%b "$sha" \
-                | sed -e 's/[[:space:]]*$//' \
-                      -e '/^Co-Authored-By:/d' \
-                      -e '/^Co-developed-by:/d' \
-                      -e '/^Signed-off-by:/d' \
-                      -e '/^Reviewed-by:/d' \
-                      -e '/^Suggested-by:/d' \
-                      -e '/^Helped-by:/d')"
-              if [ -n "$body" ]; then printf '%s\n\n' "$body"; fi
-            } >> "$NOTES"
-          done
-
-          if [ -n "$PREV" ]; then
-            echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREV}...${GITHUB_REF_NAME}" >> "$NOTES"
-          else
-            echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/commits/${GITHUB_REF_NAME}" >> "$NOTES"
-          fi
+          {
+            echo
+            if [ -n "$PREV" ]; then
+              echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREV}...${GITHUB_REF_NAME}"
+            else
+              echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/commits/${GITHUB_REF_NAME}"
+            fi
+          } >> "$NOTES"
 
           echo "::notice::release notes $(wc -l < "$NOTES") 行"
           {
