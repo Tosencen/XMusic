@@ -50,6 +50,19 @@ import kotlin.coroutines.resumeWithException
  * 插件管理器：安装 / 加载 / 能力分发。
  * 暴露 MusicSourceProvider 门面给 UI 层。
  */
+/**
+ * 歌手搜索**不**遍历的音源。
+ *
+ * 这些源的 `searchArtists` 查的是用户/UP 主库而不是艺人库——输入什么词都能撞到
+ * 用户名包含该词的账号。实测搜 "aaaabbbb" 会出「aaaabbbb3399 · 歌手 · 42 首」这类结果，
+ * 而「歌手」栏的语义应该是音乐人/组合，不是任意用户。
+ *
+ * 视频源的价值在「歌曲」tab（翻唱、音频视频），不在歌手页。
+ *
+ * 集中在这里而不是散在 UI 层：插件日后若改成返回真艺人，删掉对应 id 即可。
+ */
+val ArtistSearchExcludedSources: Set<String> = setOf("bilibili")
+
 class PluginManager(private val context: Context) {
     companion object {
         private const val TAG = "PluginManager"

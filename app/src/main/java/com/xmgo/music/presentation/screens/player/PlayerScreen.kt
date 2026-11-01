@@ -8,9 +8,11 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
@@ -81,6 +83,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -566,6 +569,7 @@ fun PlayerScreen(onNavigateUp: () -> Unit) {
         QueueSheet(
             queue = state.queue,
             currentMediaId = state.current?.mediaId,
+            isPlaying = state.isPlaying,
             shuffleEnabled = state.shuffleEnabled,
             onToggleShuffle = { playerController.toggleShuffle() },
             onSelect = { index ->
@@ -590,21 +594,33 @@ fun PlayerScreen(onNavigateUp: () -> Unit) {
 private fun QueueSheet(
     queue: List<MediaItem>,
     currentMediaId: String?,
+    isPlaying: Boolean,
     shuffleEnabled: Boolean,
     onToggleShuffle: () -> Unit,
     onSelect: (Int) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val listState = rememberLazyListState()
+    val currentIndex = queue.indexOfFirst { it.mediaId == currentMediaId }
+    // 打开即定位到正在播放：弹窗是临时上下文，点开队列十有八九是想看
+    // 「现在播到哪、接下来是什么」。跟列表页的 ScrollToCurrentButton 不同，
+    // 这里该**自动**定位——不该再要用户点一下。
+    LaunchedEffect(Unit) {
+        if (currentIndex >= 0) listState.scrollToItem(currentIndex)
+    }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(540.dp)
-        ) {
+        // 高度随队列长度自适应，上限取屏高 72%：小屏不溢出、大屏不浪费。
+        // 原来写死 540dp，小屏/横屏下会撑出去裁掉底部。
+        val maxH = LocalConfiguration.current.screenHeightDp.dp * 0.72f
+        val desiredH = 56.dp * queue.size.coerceIn(1, 9) + 88.dp
+        // 定位后给当前行闪两下：滚到位只是"到了"，一闪才知道是哪行
+        var locatePulse by remember { mutableStateOf(false) }
+        Box(modifier = Modifier.fillMaxWidth().height(desiredH.coerceAtMost(maxH))) {
+        Column(modifier = Modifier.fillMaxSize()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -628,59 +644,116 @@ private fun QueueSheet(
                     )
                 }
             }
-            // 队列 key 预计算：混 index 会让随机播放/增删时整列 key 全变（全量重绑）；
-            // 去重计数既保证同一首歌重复入队时 key 唯一，又让未变动项保留组合状态
-            val queueKeys = remember(queue) { stableKeys(queue) { it.mediaId } }
-            LazyColumn(modifier = Modifier.weight(1f)) {
-                itemsIndexed(queue, key = { index, _ -> queueKeys[index] }) { index, item ->
-                    val isCurrent = item.mediaId == currentMediaId
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelect(index) }
-                            .padding(horizontal = 24.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (isCurrent) {
-                            Icon(
-                                imageVector = Icons.Rounded.GraphicEq,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        } else {
-                            Text(
-                                text = "${index + 1}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.width(24.dp)
-                            )
+            if (queue.isEmpty()) {
+                Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "队列为空",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                // 当前行底色：平时 0.45，被「定位」跳转后闪两下提醒
+                val rowBgAlpha = remember { androidx.compose.animation.core.Animatable(0.45f) }
+                LaunchedEffect(locatePulse) {
+                    if (locatePulse) {
+                        repeat(2) {
+                            rowBgAlpha.animateTo(0.95f, tween(170))
+                            rowBgAlpha.animateTo(0.45f, tween(170))
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = item.mediaMetadata.title?.toString() ?: "未知歌曲",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = if (isCurrent) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurface
-                                },
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = item.mediaMetadata.artist?.toString() ?: "",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                    }
+                }
+                // 队列 key 预计算：混 index 会让随机播放/增删时整列 key 全变（全量重绑）；
+                // 去重计数既保证同一首歌重复入队时 key 唯一，又让未变动项保留组合状态
+                val queueKeys = remember(queue) { stableKeys(queue) { it.mediaId } }
+                LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
+                    itemsIndexed(queue, key = { index, _ -> queueKeys[index] }) { index, item ->
+                        val isCurrent = item.mediaId == currentMediaId
+                        val durationMs = item.mediaMetadata.durationMs ?: 0L
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(
+                                    // 当前行加圆角底色：原来只染文字，跟 SongRow 的高亮差太远，
+                                    // 滚到远处几乎认不出哪首在播
+                                    if (isCurrent) {
+                                        Modifier
+                                            .padding(horizontal = 8.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(
+                                                MaterialTheme.colorScheme.secondaryContainer
+                                                    .copy(alpha = rowBgAlpha.value)
+                                            )
+                                    } else {
+                                        Modifier
+                                    }
+                                )
+                                .clickable { onSelect(index) }
+                                .padding(horizontal = 24.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (isCurrent) {
+                                com.xmgo.music.presentation.shared_components.AnimatedEqIcon(
+                                    isPlaying = isPlaying,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            } else {
+                                Text(
+                                    text = "${index + 1}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.width(24.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = item.mediaMetadata.title?.toString() ?: "未知歌曲",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = if (isCurrent) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = item.mediaMetadata.artist?.toString() ?: "",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            if (durationMs > 0) {
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = formatTime(durationMs),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
             }
             Spacer(modifier = Modifier.navigationBarsPadding())
+        }
+        // 定位到正在播放：滚远了想回来，跟列表页同一套语义（该行不在视口内才显示）
+        com.xmgo.music.presentation.shared_components.ScrollToCurrentButton(
+            listState = listState,
+            currentIndex = currentIndex,
+            onLocated = {
+                // 先清一次再置位，保证连续点两次也能重新触发脉冲
+                locatePulse = false
+                locatePulse = true
+            },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = 24.dp)
+        )
         }
     }
 }

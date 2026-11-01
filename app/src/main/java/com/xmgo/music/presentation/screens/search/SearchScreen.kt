@@ -132,6 +132,39 @@ private fun ArtistHit.rankScore(query: String, primary: String): Int {
     return score
 }
 
+/**
+ * 歌手名与查询词的匹配档位（越小越靠前）。**只降权，不丢弃。**
+ *
+ * 0 = 强匹配：相等 / 前缀 / 包含。搜「abba」出「ABBA」「Abbas」。
+ * 1 = 弱匹配：名字带数字而查询词没有（"aaaabbbb3399"），
+ *     或双方纯 ASCII 且名字长度 >= 查询词 2 倍（"aaaabbbbccccdddd"）。
+ * 2 = 无关：名字根本不含查询词。实测搜「abba」网易会推「周杰伦」——
+ *     源那边多半是靠别名/相关性推的，不该由我们判断真假，
+ *     但**必须沉底**，否则就是「不管输什么都出内容」。
+ *
+ * 刻意**不**用 CJK 长度比判定弱匹配：中文艺名常常比查询词长得多
+ * （搜「五月天」出「五月天 Mayday」），误伤代价比留噪声高。
+ */
+private fun artistNameMatchTier(query: String, name: String): Int {
+    if (query.isEmpty()) return 0
+    if (name == query || name.startsWith(query) || name.contains(query)) {
+        if (name == query) return 0
+        if (name.any { it.isDigit() } && query.none { it.isDigit() }) return 1
+        fun asciiOnly(x: String) = x.all { it.code < 128 }
+        return if (asciiOnly(query) && asciiOnly(name) && name.length >= query.length * 2.0) 1 else 0
+    }
+    return 2
+}
+
+/** 歌手结果排序：按匹配档位分层（强 → 弱 → 无关），层内按 rankScore。 */
+private fun List<ArtistHit>.sortedForDisplay(query: String, primary: String): List<ArtistHit> {
+    val q = query.trim().lowercase()
+    return sortedWith(
+        compareBy<ArtistHit> { artistNameMatchTier(q, it.artist.name.trim().lowercase()) }
+            .thenByDescending { it.rankScore(q, primary) }
+    )
+}
+
 private fun AlbumHit.rankScore(query: String, primary: String): Int {
     var score = 0
     if (!album.artworkUrl.isNullOrBlank()) score += 3
@@ -262,7 +295,8 @@ fun SearchScreen(
                 when (tab) {
                     1 -> {
                         val sources = plugins.filter {
-                            pluginManager.hasCapability(it.id, "searchArtists")
+                            pluginManager.hasCapability(it.id, "searchArtists") &&
+                                it.id !in com.xmgo.music.plugin.ArtistSearchExcludedSources
                         }
                         if (sources.isEmpty()) error = "未安装可用插件"
                         val pages = coroutineScope {
@@ -278,7 +312,7 @@ fun SearchScreen(
                         artists = pages
                             .flatMap { (id, page) -> page.items.map { ArtistHit(id, it) } }
                             .distinctBy { "${it.sourceId}:${it.artist.id}" }
-                            .sortedByDescending { it.rankScore(q, primarySource) }
+                            .sortedForDisplay(q, primarySource)
                         artistCursors = sources.associate { p ->
                             p.id to pages.firstOrNull { it.first == p.id }?.second?.nextCursor
                         }
@@ -379,7 +413,7 @@ fun SearchScreen(
                         artists = (artists + pages.flatMap { (id, page) ->
                             page.items.map { ArtistHit(id, it) }
                         }).distinctBy { "${it.sourceId}:${it.artist.id}" }
-                            .sortedByDescending { it.rankScore(q, primarySource) }
+                            .sortedForDisplay(q, primarySource)
                         artistCursors = artistCursors + pages.associate { (id, page) ->
                             id to page.nextCursor
                         }
