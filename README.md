@@ -6,6 +6,10 @@
 
 Android 音乐播放器，插件化架构：应用本体只是一个插件运行框架，搜索、播放、歌词、登录等能力全部由第三方 `.qplug` 插件（Rhino JS）提供。
 
+| 首页 | 播放页 | 悬浮歌词 |
+|:---:|:---:|:---:|
+| ![首页](docs/screenshots/home.png) | ![播放页](docs/screenshots/player.png) | ![悬浮歌词](docs/screenshots/overlay.png) |
+
 ## 功能
 
 - **插件系统**：`.qplug` 在线安装与热更新；内置插件目录——`netease`、`qq`、`kuwo`、`migu`、`kugou`、`soda`
