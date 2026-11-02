@@ -90,6 +90,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import coil3.compose.AsyncImage
@@ -211,6 +212,22 @@ fun PlayerScreen(onNavigateUp: () -> Unit) {
             .offset { androidx.compose.ui.unit.IntOffset(0, sheetDrag.value.roundToInt()) }
             .padding(top = topGap)
             .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+    )
+
+    // 触摸拦截层：本页是浮在首页/列表之上的弹层，非按钮区域（空白、封面外的背景）
+    // 如果没有 handler，触摸会**穿透到下层页面**，表现为"点了播放页却把下面的歌单点开了"。
+    //
+    // 关键：拦截层要作为**内容的兄弟、放在内容之下**，不能挂在内容根上——
+    // 挂根上会连内层按钮的事件一起吃掉（实测播放/暂停、顶部关闭区全失效）。
+    // 兄弟层的命中测试是确定的：内层按钮有 handler 会被先命中，没人要的事件才落到这层。
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .offset { androidx.compose.ui.unit.IntOffset(0, sheetDrag.value.roundToInt()) }
+            .padding(top = topGap)
+            .pointerInput(Unit) {
+                detectTapGestures { /* 吞掉点击，不做任何事 */ }
+            }
     )
 
     // 封面从屏幕顶端铺起；返回按钮悬浮于封面左上

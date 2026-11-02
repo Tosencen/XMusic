@@ -1,5 +1,6 @@
 package com.xmgo.music.presentation.navigation
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.graphics.Color
@@ -267,6 +268,8 @@ fun Nav() {
                     .background(
                         Color.Black.copy(alpha = 0.5f * (1f - drag.coerceIn(0f, 1f)))
                     )
+                    // 点暗部关闭；同时吞掉触摸，不让它穿透到下层页面
+                    .clickable { showPlayer = false }
             )
         }
         // 播放页弹层（最上层）：从下滑入/滑出，关闭时下层（首页等）始终真实可见
