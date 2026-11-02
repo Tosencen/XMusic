@@ -221,14 +221,28 @@ fun CloudMusicScreen(
                                     .clickable {
                                         scope.launch { CloudScanManager.scanFolder(folder.fileId, folder.name) }
                                     }
-                                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                                    // 14dp padding + 40dp 图标容器 = 68dp 行高，
+                                    // 与歌曲行、本地 SongRow 齐平（原先 46dp 明显偏矮）
+                                    .padding(horizontal = 16.dp, vertical = 14.dp)
                             ) {
-                                Icon(
-                                    Icons.Rounded.Folder,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(22.dp)
-                                )
+                                // 图标套浅底容器：视觉锚点更强，一眼区分「文件夹」和「文件」；
+                                // 裸图标放大到 28dp 会比 15sp 文字突出、比例失衡
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                        )
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Folder,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                }
                                 Spacer(Modifier.width(12.dp))
                                 Text(
                                     text = folder.name,
@@ -297,6 +311,9 @@ private fun CloudTrackRow(
                 }
             )
             .clickable(onClick = onClick)
+            // 10dp padding + 约 48dp 内容（标题+大小+来源 chip）= 68dp 行距，
+            // 与本地 SongRow、文件夹行齐平。**不要动这个值**：
+            // 实测加到 14dp 会让行距变成 76dp，反而偏离 SongRow 的 68dp
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         Text(
