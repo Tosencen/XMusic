@@ -97,6 +97,8 @@ class PlayerController(
 
     /** 流地址失效自动重解析的防死循环标记（同一曲目 30 秒内只重试一次）。 */
     @Volatile private var lastRetryMediaId: String? = null
+    /** 跳下一首时要恢复的播放态（重试耗尽分支用）。 */
+    @Volatile private var shouldPlayAfterRetry = true
     @Volatile private var lastRetryAt = 0L
 
     private val mainExecutor = Executor { it.run() }
@@ -610,13 +612,26 @@ class PlayerController(
         val item = c.getMediaItemAt(index)
         val song = item.toSongOrNull() ?: return // 本地歌无从重解析
         val now = System.currentTimeMillis()
-        if (item.mediaId == lastRetryMediaId && now - lastRetryAt < 30_000) return
+        if (item.mediaId == lastRetryMediaId && now - lastRetryAt < 30_000) {
+            // 重试过仍失败：跳下一首，别把播放卡死在这首上
+            Log.w("PlayerController", "播放失败(${error.errorCode}) 重试无效，跳下一首 ${item.mediaId}")
+            if (c.hasNextMediaItem()) {
+                c.seekToNextMediaItem()
+                c.prepare()
+                if (shouldPlayAfterRetry) c.play()
+            }
+            return
+        }
         lastRetryMediaId = item.mediaId
         lastRetryAt = now
         val position = c.currentPosition.coerceAtLeast(0)
         val shouldPlay = c.playWhenReady
+        shouldPlayAfterRetry = shouldPlay
         Log.w("PlayerController", "播放失败(${error.errorCode})，重解析 ${item.mediaId}")
         scope.launch {
+            // **必须先失效流地址缓存**：改成懒解析后 toMediaItem 只重建占位 URI，
+            // 不失效缓存的话 PluginResolvingDataSource 会拿到同一条过期直链、必然再失败
+            runCatching { pluginManager.invalidateStream(song.sourceId, song.rawId) }
             val fresh = runCatching {
                 song.toMediaItem(cachedMusicStore)
             }.getOrNull() ?: return@launch

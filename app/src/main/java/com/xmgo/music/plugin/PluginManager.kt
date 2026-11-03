@@ -101,6 +101,14 @@ class PluginManager(private val context: Context) {
 
     private val streamCache = object : android.util.LruCache<String, CachedStream>(64) {}
 
+    /**
+     * 失效某曲目的流地址缓存：播放报错时强制重新解析（直链可能已过期/被风控）。
+     * 键与 [resolveStream] 内一致：`sourceId:rawId`。
+     */
+    fun invalidateStream(sourceId: String, rawId: String) {
+        streamCache.remove("$sourceId:$rawId")
+    }
+
 
     /** 已安装插件快照（可变，读取时复制）。 */
     val plugins: List<InstalledPlugin> get() = synchronized(_plugins) { _plugins.toList() }
