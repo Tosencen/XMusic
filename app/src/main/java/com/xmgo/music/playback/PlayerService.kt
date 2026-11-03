@@ -63,8 +63,13 @@ class PlayerService : MediaSessionService() {
             .readTimeout(20, TimeUnit.SECONDS)
             .build()
         val upstream = DefaultDataSource.Factory(this, OkHttpDataSource.Factory(okHttp))
+        // 插件占位 URI（plugin://…）→ 播到哪首才换真流地址（resolveStream 是 JS+HTTP，
+        // 预解析会让队列"慢慢长"；见 PluginStreamSource 的说明）
+        val pluginManager: com.xmgo.music.plugin.PluginManager =
+            org.koin.core.context.GlobalContext.get().get()
+        val pluginResolving = PluginResolvingDataSourceFactory(upstream, pluginManager)
         // 网盘占位 URI（cloud://…）→ 播到哪首才换真直链（阿里直链 15 分钟过期，不能预解析）
-        val cloudResolving = CloudResolvingDataSourceFactory(upstream)
+        val cloudResolving = CloudResolvingDataSourceFactory(pluginResolving)
         // 按 mediaId 注入插件登记的防盗链请求头（Referer/UA 等），B 站等源必需
         val headerInjecting = HeaderInjectingDataSourceFactory(cloudResolving)
         val cacheFactory = CacheDataSource.Factory()

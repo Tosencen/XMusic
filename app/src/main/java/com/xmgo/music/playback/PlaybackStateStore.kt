@@ -80,9 +80,16 @@ class PlaybackStateStore(private val context: Context) {
                 ?.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0
         )
 
-        fun PersistedItem.toMediaItem(): MediaItem = MediaItem.Builder()
+        fun PersistedItem.toMediaItem(): MediaItem {
+            // 重启后进程内的 SongStore 是空的，懒解析（PluginResolvingDataSource）
+            // 要按 mediaId 找回 Song 才能调 resolveStream，这里从持久化元数据重建登记
+            SongStore.restoreItem(this)
+            return MediaItem.Builder()
             .setMediaId(mediaId)
             .setUri(uri)
+            // 恢复后也要缓存键，否则 CacheDataSource 按 key 查不到已缓存音频，
+            // 白白走一遍懒解析/网络
+            .setCustomCacheKey(mediaId)
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(title)
@@ -94,5 +101,6 @@ class PlaybackStateStore(private val context: Context) {
                     .build()
             )
             .build()
+        }
     }
 }

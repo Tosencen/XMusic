@@ -284,7 +284,7 @@ class PlayerController(
     fun playNext(song: com.xmgo.music.plugin.model.Song) {
         scope.launch {
             val item = runCatching {
-                song.toMediaItem(pluginManager, cachedMusicStore)
+                song.toMediaItem(cachedMusicStore)
             }.getOrNull() ?: return@launch
             val c = controller ?: return@launch
             if (c.mediaItemCount == 0) {
@@ -344,7 +344,7 @@ class PlayerController(
         Log.w("PlayerController", "IDLE 态点播放，重解析 ${item.mediaId}")
         scope.launch {
             val fresh = runCatching {
-                song.toMediaItem(pluginManager, cachedMusicStore)
+                song.toMediaItem(cachedMusicStore)
             }.getOrNull()
             val cc = controller ?: return@launch
             if (cc.currentMediaItemIndex != index) return@launch // 期间已切歌
@@ -618,7 +618,7 @@ class PlayerController(
         Log.w("PlayerController", "播放失败(${error.errorCode})，重解析 ${item.mediaId}")
         scope.launch {
             val fresh = runCatching {
-                song.toMediaItem(pluginManager, cachedMusicStore)
+                song.toMediaItem(cachedMusicStore)
             }.getOrNull() ?: return@launch
             val cc = controller ?: return@launch
             if (cc.currentMediaItemIndex != index) return@launch // 已切歌，放弃

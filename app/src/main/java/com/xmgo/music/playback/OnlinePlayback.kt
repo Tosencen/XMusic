@@ -24,10 +24,11 @@ import kotlinx.coroutines.sync.withPermit
  * mediaId 约定为 sourceId:rawId，与歌词查询保持一致。
  */
 suspend fun Song.toMediaItem(
-    pluginManager: PluginManager,
     cache: CachedMusicStore? = null
 ): MediaItem {
-    val mediaId = "$sourceId:$rawId"
+    val mediaId = PluginStream.mediaIdOf(this)
+    // 登记 Song 供懒解析反查：PluginResolvingDataSource 按 mediaId 找回 Song 调 resolveStream
+    SongStore.put(this)
     // 命中本地缓存：免解析、免联网，且不受流地址过期影响
     val localUri = cache?.localUriFor(mediaId)?.toString()
     val uri: String = if (localUri != null) {
@@ -35,18 +36,19 @@ suspend fun Song.toMediaItem(
         StreamHeaders.remove(mediaId)
         localUri
     } else {
-        val stream = pluginManager.providerFor(sourceId).resolveStream(this)
-        // media3 的 MediaItem 无法携带 per-item HTTP 头，先登记，
-        // 由 HeaderInjectingDataSource 在真正发起请求时按 mediaId 注入
-        //（B 站等防盗链源必须带 Referer + UA，否则 CDN 返回 403）
-        StreamHeaders.put(mediaId, stream.headers)
-        stream.url
+        // **懒解析**：这里只塞占位 URI，真链接由 PluginResolvingDataSource 播到那首时才换。
+        // 原先在此调 resolveStream —— 100 首歌单要 100 次网络请求才能建队列，
+        // 表现为「播放队列慢慢长出来」。队列 UI 只要元数据，流地址用不上。
+        PluginStream.uriOf(this).toString()
     }
     return MediaItem.Builder()
         .setMediaId(mediaId)
         .setUri(uri)
-        // 流地址会过期换签名：用 mediaId 作缓存键，磁盘缓存才能跨地址命中（本地文件不缓存）
-        .apply { if (uri.startsWith("http")) setCustomCacheKey(mediaId) }
+        // 用 mediaId 作缓存键：CacheDataSource 按它查磁盘缓存，命中则根本不走懒解析；
+        // 流地址会过期换签名，mediaId 才能跨地址命中。本地文件不缓存故不设
+        .apply {
+            if (localUri == null || uri.startsWith("http")) setCustomCacheKey(mediaId)
+        }
         .setMediaMetadata(
             MediaMetadata.Builder()
                 .setTitle(name)
@@ -80,7 +82,7 @@ suspend fun resolveQueue(
             .map { song ->
                 async {
                     semaphore.withPermit {
-                        runCatching { song.toMediaItem(pluginManager, cache) }.getOrNull()
+                        runCatching { song.toMediaItem(cache) }.getOrNull()
                     }
                 }
             }
@@ -147,7 +149,7 @@ suspend fun playSongsStaged(
     cancelStagedFill()
     val t0 = System.currentTimeMillis()
     val target = withContext(Dispatchers.IO) {
-        runCatching { song.toMediaItem(pluginManager, cache) }.getOrNull()
+        runCatching { song.toMediaItem(cache) }.getOrNull()
     } ?: return false
     android.util.Log.d("OnlinePlayback", "目标曲解析耗时 ${System.currentTimeMillis() - t0}ms ${target.mediaId}")
     playerController.playQueue(listOf(target), startIndex = 0)
@@ -239,7 +241,7 @@ private suspend fun resolveEntries(
                         when (entry) {
                             is PlayableEntry.Local -> entry.song.toMediaItem()
                             is PlayableEntry.Online ->
-                                runCatching { entry.song.toMediaItem(pluginManager, cache) }.getOrNull()
+                                runCatching { entry.song.toMediaItem(cache) }.getOrNull()
                         }
                     }
                 }
@@ -270,7 +272,7 @@ suspend fun playEntriesStaged(
         when (entry) {
             is PlayableEntry.Local -> entry.song.toMediaItem()
             is PlayableEntry.Online ->
-                runCatching { entry.song.toMediaItem(pluginManager, cache) }.getOrNull()
+                runCatching { entry.song.toMediaItem(cache) }.getOrNull()
         }
     } ?: return false
     android.util.Log.d("OnlinePlayback", "目标曲解析耗时 ${System.currentTimeMillis() - t0}ms ${target.mediaId}")
