@@ -14,6 +14,9 @@
     <string name="look_and_feel_desc">主题、配色与字体</string>
     <string name="overlay_lyric">悬浮歌词</string>
     <string name="overlay_lyric_entry_desc">在其它应用上方悬浮显示歌词</string>
+    <string name="overlay_lyric_group_basic">基本</string>
+    <string name="overlay_lyric_group_layout">排版</string>
+    <string name="overlay_lyric_group_appearance">外观</string>
     <string name="overlay_lyric_enabled">启用悬浮歌词</string>
     <string name="overlay_lyric_enabled_desc">在其它应用上方显示歌词，需授予悬浮窗权限</string>
     <string name="overlay_lyric_locked">锁定悬浮窗</string>

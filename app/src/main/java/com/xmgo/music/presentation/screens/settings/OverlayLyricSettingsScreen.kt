@@ -1,5 +1,6 @@
 package com.xmgo.music.presentation.screens.settings
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -42,7 +43,6 @@ import com.xmgo.music.data.datastore.rememberOverlayLyricTransMode
 import com.xmgo.music.data.datastore.rememberOverlayLyricWidth
 import com.xmgo.music.overlay.OverlayLyricManager
 import com.xmgo.music.presentation.screens.settings.components.SettingsScaffold
-import com.xmgo.music.presentation.screens.settings.components.SettingsWithTitle
 
 /** 悬浮歌词设置页（设置主页入口 → 本页）。 */
 @Composable
@@ -89,14 +89,12 @@ private fun OverlayLyricSettingsContent() {
         onPauseOrDispose { }
     }
 
-    SettingsWithTitle(title = R.string.overlay_lyric) {
-        Card(
-            colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surfaceContainer),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 2.dp),
-            shape = RoundedCornerShape(24.dp)
-        ) {
+    // 每项一张独立小卡（对齐主设置页 XmsSettingsItem 的拼接样式：
+    // 首条 24/6、中间 6/6、末条 6/24、单条 24/24），卡间距 4dp。
+    // 不再用大 Card 把一组全包住——滑块和开关挤在一块里不好扫
+    Column(modifier = Modifier.padding(top = 8.dp)) {
+        GroupLabel(R.string.overlay_lyric_group_basic)
+        LyricItemCard(topDp = 24.dp, bottomDp = if (enabled) 6.dp else 24.dp) {
             SettingsSwitchRow(
                 title = stringResource(R.string.overlay_lyric_enabled),
                 description = stringResource(R.string.overlay_lyric_enabled_desc),
@@ -117,13 +115,17 @@ private fun OverlayLyricSettingsContent() {
                     }
                 }
             )
-            if (enabled) {
+        }
+        if (enabled) {
+            LyricItemCard(topDp = 6.dp, bottomDp = 6.dp) {
                 SettingsSwitchRow(
                     title = stringResource(R.string.overlay_lyric_locked),
                     description = stringResource(R.string.overlay_lyric_locked_desc),
                     checked = locked,
                     onCheckedChange = { locked = it }
                 )
+            }
+            LyricItemCard(topDp = 6.dp, bottomDp = 6.dp) {
                 SettingsSliderRow(
                     title = stringResource(R.string.overlay_lyric_font_size),
                     value = fontSize.toFloat(),
@@ -131,7 +133,19 @@ private fun OverlayLyricSettingsContent() {
                     valueText = "$fontSize",
                     onValueChange = { fontSize = it.toInt() }
                 )
-                // ---- 排版组：行数 / 行距 / 译文 ----
+            }
+            LyricItemCard(topDp = 6.dp, bottomDp = 24.dp) {
+                SettingsSliderRow(
+                    title = stringResource(R.string.overlay_lyric_width),
+                    value = widthPct.toFloat(),
+                    valueRange = 50f..100f,
+                    valueText = "$widthPct%",
+                    onValueChange = { widthPct = it.toInt() }
+                )
+            }
+
+            GroupLabel(R.string.overlay_lyric_group_layout)
+            LyricItemCard(topDp = 24.dp, bottomDp = 6.dp) {
                 SettingsChoiceRow(
                     title = stringResource(R.string.overlay_lyric_line_count),
                     description = stringResource(R.string.overlay_lyric_line_count_desc),
@@ -142,14 +156,18 @@ private fun OverlayLyricSettingsContent() {
                     selectedIndex = if (lineCount <= 1) 0 else 1,
                     onSelect = { lineCount = if (it == 0) 1 else 3 }
                 )
+            }
+            LyricItemCard(topDp = 6.dp, bottomDp = 6.dp) {
                 SettingsSliderRow(
                     title = stringResource(R.string.overlay_lyric_line_spacing),
                     description = stringResource(R.string.overlay_lyric_line_spacing_desc),
                     value = lineSpacing.toFloat(),
                     valueRange = 160f..320f,
-                    valueText = "%.1f×".format(lineSpacing / 100f),
+                    valueText = "%.1f\u00d7".format(lineSpacing / 100f),
                     onValueChange = { lineSpacing = it.toInt() }
                 )
+            }
+            LyricItemCard(topDp = 6.dp, bottomDp = 6.dp) {
                 SettingsSliderRow(
                     title = stringResource(R.string.overlay_lyric_trans_gap),
                     description = stringResource(R.string.overlay_lyric_trans_gap_desc),
@@ -158,6 +176,8 @@ private fun OverlayLyricSettingsContent() {
                     valueText = "${transGap}dp",
                     onValueChange = { transGap = it.toInt() }
                 )
+            }
+            LyricItemCard(topDp = 6.dp, bottomDp = 24.dp) {
                 SettingsChoiceRow(
                     title = stringResource(R.string.overlay_lyric_trans_mode),
                     options = listOf(
@@ -168,13 +188,10 @@ private fun OverlayLyricSettingsContent() {
                     selectedIndex = transMode.coerceIn(0, 2),
                     onSelect = { transMode = it }
                 )
-                SettingsSliderRow(
-                    title = stringResource(R.string.overlay_lyric_width),
-                    value = widthPct.toFloat(),
-                    valueRange = 50f..100f,
-                    valueText = "$widthPct%",
-                    onValueChange = { widthPct = it.toInt() }
-                )
+            }
+
+            GroupLabel(R.string.overlay_lyric_group_appearance)
+            LyricItemCard(topDp = 24.dp, bottomDp = 6.dp) {
                 SettingsSliderRow(
                     title = stringResource(R.string.overlay_lyric_bg_opacity),
                     value = bgOpacity.toFloat(),
@@ -182,6 +199,8 @@ private fun OverlayLyricSettingsContent() {
                     valueText = "$bgOpacity%",
                     onValueChange = { bgOpacity = it.toInt() }
                 )
+            }
+            LyricItemCard(topDp = 6.dp, bottomDp = 24.dp) {
                 SettingsSwitchRow(
                     title = stringResource(R.string.overlay_lyric_outline),
                     description = stringResource(R.string.overlay_lyric_outline_desc),
@@ -191,6 +210,38 @@ private fun OverlayLyricSettingsContent() {
             }
         }
     }
+}
+
+@Composable
+private fun GroupLabel(@StringRes title: Int) {
+    Text(
+        text = stringResource(title),
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+    )
+}
+
+/** 独立小卡：topDp/bottomDp 控制组内首/中/末的圆角拼接（对齐 XmsSettingsItem）。 */
+@Composable
+private fun LyricItemCard(
+    topDp: androidx.compose.ui.unit.Dp,
+    bottomDp: androidx.compose.ui.unit.Dp,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+        ),
+        shape = RoundedCornerShape(
+            topStart = topDp, topEnd = topDp,
+            bottomStart = bottomDp, bottomEnd = bottomDp
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 2.dp),
+        content = content
+    )
 }
 
 @Composable
@@ -237,7 +288,7 @@ private fun SettingsSliderRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 4.dp)
+            .padding(horizontal = 20.dp, vertical = 14.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -257,6 +308,8 @@ private fun SettingsSliderRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+        // 与标题/说明之间留口气：Slider 自带的垂直内边距不够，紧贴文字看着像两块粘在一起
+        Spacer(Modifier.height(6.dp))
         Slider(
             value = value,
             onValueChange = onValueChange,
@@ -277,7 +330,7 @@ private fun SettingsChoiceRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 8.dp)
+            .padding(horizontal = 20.dp, vertical = 14.dp)
     ) {
         Text(text = title, style = MaterialTheme.typography.bodyLarge)
         if (description != null) {
